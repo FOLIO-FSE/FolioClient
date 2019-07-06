@@ -5,6 +5,7 @@ from folioclient.cached_property import cached_property
 
 class FolioClient:
     '''handles communication and getting values from FOLIO'''
+
     def __init__(self, okapi_url, tenant_id, username, password):
         self.missing_location_codes = set()
         self.cql_all = '?limit=100&query=cql.allRecords=1 sortby name'
@@ -20,8 +21,8 @@ class FolioClient:
     @cached_property
     def identifier_types(self):
             return self.folio_get("/identifier-types",
-                                    "identifierTypes",
-                                    self.cql_all)
+                                  "identifierTypes",
+                                  self.cql_all)
 
     @cached_property
     def contributor_types(self):
@@ -101,7 +102,7 @@ class FolioClient:
             raise ValueError("No {} setup in tenant".format(key))
         return result
 
-    def folio_get(self, path):
+    def folio_get_single_object(self, path):
         '''Fetches data from FOLIO and turns it into a json object'''
         url = self.okapi_url+path
         req = requests.get(url,
