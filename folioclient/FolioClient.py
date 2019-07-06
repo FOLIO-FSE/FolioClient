@@ -73,7 +73,7 @@ class FolioClient:
     def organizations(self):
         return self.folio_get("/organizations-storage/organizations",
                               "organizations",
-                              self.self.cql_all)
+                              self.cql_all)
 
     def login(self):
         '''Logs into FOLIO in order to get the okapi token'''
