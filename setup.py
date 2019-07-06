@@ -2,13 +2,13 @@ from distutils.core import setup
 setup(
   name='folioclient',
   packages=['folioclient'],
-  version='0.1',
+  version='0.2',
   license='MIT',
   description='A simple wrapper over the FOLIO LMS system API:s',
   author='Theodor Tolstoy',
   author_email='pypi.teddes@tolstoy.se',
   url='https://github.com/fontanka16/FolioClient',
-  download_url='https://github.com/fontanka16/FolioClient/archive/v_01.tar.gz',
+  download_url='https://github.com/fontanka16/FolioClient/archive/v_02.tar.gz',
   keywords=['FOLIO', 'FOLIO_LSP', 'OKAPI', 'API Wrapper'],
   install_requires=[            # I get to this in a second
           'requests'
