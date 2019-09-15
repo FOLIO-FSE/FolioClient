@@ -76,6 +76,18 @@ class FolioClient:
                               "organizations",
                               self.cql_all)
 
+    @cached_property
+    def modes_of_issuance(self):
+        return self.folio_get("/modes-of-issuance",
+                              "issuanceModes",
+                              self.cql_all)
+
+    @cached_property
+    def instance_types(self):
+        return self.folio_get("/instance-types",
+                              "instanceTypes",
+                              self.cql_all)
+
     def login(self):
         '''Logs into FOLIO in order to get the okapi token'''
         headers = {
