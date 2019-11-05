@@ -152,7 +152,7 @@ class FolioClient:
                          if location_code.strip() == l['code']),
                         (next(l['id'] for l in self.locations
                               if l['code']
-                              in ['catch_all', 'default', 'Default']))
+                              in ['catch_all', 'default', 'Default', 'ATDM']))
                         )
         except Exception as exception:
             raise ValueError(("No location with code '{}' in locations. "
