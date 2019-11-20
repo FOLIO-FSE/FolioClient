@@ -20,9 +20,9 @@ class FolioClient:
 
     @cached_property
     def identifier_types(self):
-            return self.folio_get("/identifier-types",
-                                  "identifierTypes",
-                                  self.cql_all)
+        return self.folio_get("/identifier-types",
+                              "identifierTypes",
+                              self.cql_all)
 
     @cached_property
     def contributor_types(self):
@@ -103,13 +103,13 @@ class FolioClient:
         self.okapi_token = req.headers.get('x-okapi-token')
         self.refresh_token = req.headers.get('refreshtoken')
 
-    def folio_get(self, path, key, query=''):
+    def folio_get(self, path, key=None, query=''):
         '''Fetches data from FOLIO and turns it into a json object'''
-        url = self.okapi_url+path+query
+        url = self.okapi_url + path + query
         req = requests.get(url,
                            headers=self.okapi_headers)
         req.raise_for_status()
-        result = json.loads(req.text)[key]
+        result = (json.loads(req.text)[key] if key else json.loads(req.text))
         if not any(result):
             raise ValueError("No {} setup in tenant".format(key))
         return result
