@@ -121,8 +121,6 @@ class FolioClient:
                            headers=self.okapi_headers)
         req.raise_for_status()
         result = json.loads(req.text)
-        if not any(result):
-            raise ValueError("No data at {}".format(path))
         return result
 
     def get_instance_json_schema(self):
