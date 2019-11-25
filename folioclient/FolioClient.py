@@ -8,7 +8,7 @@ class FolioClient:
 
     def __init__(self, okapi_url, tenant_id, username, password):
         self.missing_location_codes = set()
-        self.cql_all = '?query=cql.allRecords=1 sortby name'
+        self.cql_all = '?   query=cql.allRecords=1 sortby name'
         self.okapi_url = okapi_url
         self.tenant_id = tenant_id
         self.username = username
@@ -110,14 +110,13 @@ class FolioClient:
         offset = 0
         q_template = "?limit={}&offset={}" if query == '' else "&limit={}&offset={}"
         temp_res = self.folio_get(
-            path, key, query + q_template.format(limit, offset))
-        results.append(temp_res)
+            path, key, query + q_template.format(limit, offset*limit))
+        results.extend(temp_res)
         while len(temp_res) == limit:
             offset += 1
             temp_res = self.folio_get(
-                path, key, query +  q_template.format(limit, offset))
-            results.append(temp_res)
-            
+                path, key, query + q_template.format(limit, offset * limit))
+            results.extend(temp_res)
         return results
 
     def folio_get(self, path, key=None, query=''):
