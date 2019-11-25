@@ -113,10 +113,11 @@ class FolioClient:
             path, key, query + q_template.format(limit, offset))
         results.append(temp_res)
         while len(temp_res) == limit:
-            temp_res = self.folio_get(
-                path, key, q_template.format(limit, offset))
-            results.append(temp_res)
             offset += 1
+            temp_res = self.folio_get(
+                path, key, query +  q_template.format(limit, offset))
+            results.append(temp_res)
+            
         return results
 
     def folio_get(self, path, key=None, query=''):
