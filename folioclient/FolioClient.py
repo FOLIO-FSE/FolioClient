@@ -8,7 +8,7 @@ class FolioClient:
 
     def __init__(self, okapi_url, tenant_id, username, password):
         self.missing_location_codes = set()
-        self.cql_all = '?limit=100&query=cql.allRecords=1 sortby name'
+        self.cql_all = '?query=cql.allRecords=1 sortby name'
         self.okapi_url = okapi_url
         self.tenant_id = tenant_id
         self.username = username
@@ -20,73 +20,73 @@ class FolioClient:
 
     @cached_property
     def identifier_types(self):
-        return self.folio_get("/identifier-types",
-                              "identifierTypes",
-                              self.cql_all)
+        return self.folio_get_all("/identifier-types",
+                                  "identifierTypes",
+                                  self.cql_all)
 
     @cached_property
     def contributor_types(self):
-        return self.folio_get("/contributor-types",
-                              "contributorTypes",
-                              self.cql_all)
+        return self.folio_get_all("/contributor-types",
+                                  "contributorTypes",
+                                  self.cql_all)
 
     @cached_property
     def contrib_name_types(self):
-        return self.folio_get("/contributor-name-types",
-                              "contributorNameTypes",
-                              self.cql_all)
+        return self.folio_get_all("/contributor-name-types",
+                                  "contributorNameTypes",
+                                  self.cql_all)
 
     @cached_property
     def instance_types(self):
-        return self.folio_get("/instance-types",
-                              "instanceTypes",
-                              self.cql_all)
+        return self.folio_get_all("/instance-types",
+                                  "instanceTypes",
+                                  self.cql_all)
 
     @cached_property
     def instance_formats(self):
-        return self.folio_get("/instance-formats",
-                              "instanceFormats",
-                              self.cql_all)
+        return self.folio_get_all("/instance-formats",
+                                  "instanceFormats",
+                                  self.cql_all)
 
     def get_single_instance(self, instance_id):
-        return self.folio_get("inventory/instances/{}"
-                              .format(instance_id))
+        return self.folio_get_all("inventory/instances/{}"
+                                  .format(instance_id))
 
     @cached_property
     def alt_title_types(self):
-        return self.folio_get("/alternative-title-types",
-                              "alternativeTitleTypes",
-                              self.cql_all)
+        return self.folio_get_all("/alternative-title-types",
+                                  "alternativeTitleTypes",
+                                  self.cql_all)
 
     @cached_property
     def locations(self):
-        return self.folio_get("/locations",
-                              "locations",
-                              self.cql_all)
+        return self.folio_get_all("/locations",
+                                  "locations",
+                                  self.cql_all)
 
     @cached_property
     def class_types(self):
-        return self.folio_get("/classification-types",
-                              "classificationTypes",
-                              self.cql_all)
+        return self.folio_get_all("/classification-types",
+                                  "classificationTypes",
+                                  self.cql_all)
 
     @cached_property
     def organizations(self):
-        return self.folio_get("/organizations-storage/organizations",
-                              "organizations",
-                              self.cql_all)
+        return self.folio_get_all("/organizations-storage/organizations",
+                                  "organizations",
+                                  self.cql_all)
 
     @cached_property
     def modes_of_issuance(self):
-        return self.folio_get("/modes-of-issuance",
-                              "issuanceModes",
-                              self.cql_all)
+        return self.folio_get_all("/modes-of-issuance",
+                                  "issuanceModes",
+                                  self.cql_all)
 
     @cached_property
     def instance_types(self):
-        return self.folio_get("/instance-types",
-                              "instanceTypes",
-                              self.cql_all)
+        return self.folio_get_all("/instance-types",
+                                  "instanceTypes",
+                                  self.cql_all)
 
     def login(self):
         '''Logs into FOLIO in order to get the okapi token'''
@@ -103,6 +103,20 @@ class FolioClient:
         self.okapi_token = req.headers.get('x-okapi-token')
         self.refresh_token = req.headers.get('refreshtoken')
 
+    def folio_get_all(self, path, key=None, query=''):
+        '''Fetches ALL data objects from FOLIO and turns it into a json object'''
+        results = list()
+        limit = 100
+        offset = 0
+        q_template = "?limit={}&offset={}" if query == '' else "&limit={}&offset={}"
+        temp_res = self.folio_get(path, key, q_template.format(limit, offset))
+        results.append(temp_res)
+        while len(temp_res) == limit:
+            temp_res = self.folio_get(
+                path, key, q_template.format(limit, offset))
+            results.append(temp_res)
+        return results
+
     def folio_get(self, path, key=None, query=''):
         '''Fetches data from FOLIO and turns it into a json object'''
         url = self.okapi_url + path + query
@@ -116,7 +130,7 @@ class FolioClient:
 
     def folio_get_single_object(self, path):
         '''Fetches data from FOLIO and turns it into a json object'''
-        url = self.okapi_url+path
+        url = self.okapi_url + path
         req = requests.get(url,
                            headers=self.okapi_headers)
         req.raise_for_status()
