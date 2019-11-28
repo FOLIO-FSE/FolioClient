@@ -126,8 +126,6 @@ class FolioClient:
                            headers=self.okapi_headers)
         req.raise_for_status()
         result = (json.loads(req.text)[key] if key else json.loads(req.text))
-        if not any(result):
-            raise ValueError("No {} setup in tenant".format(key))
         return result
 
     def folio_get_single_object(self, path):
