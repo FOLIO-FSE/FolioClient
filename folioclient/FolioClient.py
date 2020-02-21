@@ -83,7 +83,7 @@ class FolioClient:
     @cached_property
     def instance_note_types(self):
         return self.folio_get_all("/instance-note-types",
-                                  "locations",
+                                  "instanceNoteTypes",
                                   self.cql_all)
 
     @cached_property
@@ -125,7 +125,8 @@ class FolioClient:
         results = list()
         limit = 100
         offset = 0
-        q_template = "?limit={}&offset={}" if query else "&limit={}&offset={}"
+        q_template = "?limit={}&offset={}" if not query  else "&limit={}&offset={}"
+        q = query + q_template.format(limit, offset * limit)
         temp_res = self.folio_get(
             path, key, query + q_template.format(limit, offset * limit))
         results.extend(temp_res)
