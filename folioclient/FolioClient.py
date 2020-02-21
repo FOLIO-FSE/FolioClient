@@ -11,7 +11,7 @@ class FolioClient:
 
     def __init__(self, okapi_url, tenant_id, username, password):
         self.missing_location_codes = set()
-        self.cql_all = '?query=cql.allRecords=1 sortby name'
+        self.cql_all = '?query=cql.allRecords=1'
         self.okapi_url = okapi_url
         self.tenant_id = tenant_id
         self.username = username
