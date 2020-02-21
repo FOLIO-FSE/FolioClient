@@ -8,7 +8,7 @@ class FolioClient:
 
     def __init__(self, okapi_url, tenant_id, username, password):
         self.missing_location_codes = set()
-        self.cql_all = '?   query=cql.allRecords=1 sortby name'
+        self.cql_all = '?query=cql.allRecords=1 sortby name'
         self.okapi_url = okapi_url
         self.tenant_id = tenant_id
         self.username = username
@@ -65,6 +65,12 @@ class FolioClient:
                                   self.cql_all)
 
     @cached_property
+    def instance_note_types(self):
+        return self.folio_get_all("/instance-note-types",
+                                  "locations",
+                                  self.cql_all)
+
+    @cached_property
     def class_types(self):
         return self.folio_get_all("/classification-types",
                                   "classificationTypes",
@@ -80,12 +86,6 @@ class FolioClient:
     def modes_of_issuance(self):
         return self.folio_get_all("/modes-of-issuance",
                                   "issuanceModes",
-                                  self.cql_all)
-
-    @cached_property
-    def instance_types(self):
-        return self.folio_get_all("/instance-types",
-                                  "instanceTypes",
                                   self.cql_all)
 
     def login(self):
@@ -104,13 +104,14 @@ class FolioClient:
         self.refresh_token = req.headers.get('refreshtoken')
 
     def folio_get_all(self, path, key=None, query=''):
-        '''Fetches ALL data objects from FOLIO and turns it into a json object'''
+        '''Fetches ALL data objects from FOLIO and turns
+        it into a json object'''
         results = list()
         limit = 100
         offset = 0
-        q_template = "?limit={}&offset={}" if query == '' else "&limit={}&offset={}"
+        q_template = "?limit={}&offset={}" if query else "&limit={}&offset={}"
         temp_res = self.folio_get(
-            path, key, query + q_template.format(limit, offset*limit))
+            path, key, query + q_template.format(limit, offset * limit))
         results.extend(temp_res)
         while len(temp_res) == limit:
             offset += 1
@@ -141,21 +142,22 @@ class FolioClient:
         '''Fetches the JSON Schema for instances'''
         url = 'https://raw.github.com'
         path = '/folio-org/mod-inventory-storage/master/ramls/instance.json'
-        req = requests.get(url+path)
+        req = requests.get(url + path)
         return json.loads(req.text)
 
     def get_holdings_schema(self):
         '''Fetches the JSON Schema for holdings'''
         url = 'https://raw.github.com'
-        path = '/folio-org/mod-inventory-storage/master/ramls/holdingsrecord.json'
-        req = requests.get(url+path)
+        path = '/folio-org/mod-inventory-storage/master/ramls/'
+        file_name = 'holdingsrecord.json'
+        req = requests.get(url + path + file_name)
         return json.loads(req.text)
 
     def get_item_schema(self):
         '''Fetches the JSON Schema for holdings'''
-        url = 'https://raw.github.com'
+        url = 'https://raw.githubusercontent.com'
         path = '/folio-org/mod-inventory-storage/master/ramls/item.json'
-        req = requests.get(url+path)
+        req = requests.get(url + path)
         return json.loads(req.text)
 
     def get_location_id(self, location_code):
