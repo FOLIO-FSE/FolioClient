@@ -2,7 +2,7 @@ from distutils.core import setup
 setup(
     name='folioclient',
     packages=['folioclient'],
-    version='0.12',
+    version='0.13',
     license='MIT',
     description='A simple wrapper over the FOLIO LMS system API:s',
     author='Theodor Tolstoy',
