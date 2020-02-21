@@ -1,4 +1,7 @@
 import json
+import logging
+from datetime import datetime
+
 import requests
 from folioclient.cached_property import cached_property
 
@@ -130,7 +133,7 @@ class FolioClient:
         return result
 
     def folio_get_single_object(self, path):
-        '''Fetches data from FOLIO and turns it into a json object'''
+        '''Fetches data from FOLIO and turns it into a json object as is'''
         url = self.okapi_url + path
         req = requests.get(url,
                            headers=self.okapi_headers)
@@ -161,6 +164,7 @@ class FolioClient:
         return json.loads(req.text)
 
     def get_location_id(self, location_code):
+        '''returns the location ID based on a location code'''
         try:
             return next((l['id'] for l in self.locations
                          if location_code.strip() == l['code']),
@@ -171,3 +175,26 @@ class FolioClient:
         except Exception as exception:
             raise ValueError(("No location with code '{}' in locations. "
                               "No catch_all/default location either"))
+
+    def get_current_user(self):
+        try:
+            path = f'/bl-users/by-username/{self.username}'
+            resp = self.folio_get(path, 'user')
+            return resp['id']
+        except Exception as exception:
+            logging.error(
+                f'Unable to fetch user id for user {self.username}',
+                exc_info=exception)
+            return ''
+
+    def get_metadata_construct(self):
+        '''creates a metadata construct with the current API user_id
+        attached'''
+        user_id = self.get_current_user()
+        df = '%Y-%m-%dT%H:%M:%S.%f+0000'
+        return {
+            "createdDate": datetime.utcnow().strftime(df),
+            "createdByUserId": user_id,
+            "updatedDate": datetime.utcnow().strftime(df),
+            "updatedByUserId": user_id
+        }
