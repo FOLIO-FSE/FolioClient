@@ -19,6 +19,7 @@ def main():
                                args.password)
     print(len(folio_client.locations))
     print(folio_client.current_user)
+    print(folio_client.get_metadata_construct())
 
 
 if __name__ == '__main__':

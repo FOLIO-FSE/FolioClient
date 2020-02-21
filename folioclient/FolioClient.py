@@ -192,7 +192,7 @@ class FolioClient:
     def get_metadata_construct(self):
         '''creates a metadata construct with the current API user_id
         attached'''
-        user_id = self.current_user()
+        user_id = self.current_user
         df = '%Y-%m-%dT%H:%M:%S.%f+0000'
         return {
             "createdDate": datetime.utcnow().strftime(df),
