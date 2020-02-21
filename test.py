@@ -18,6 +18,7 @@ def main():
                                args.username,
                                args.password)
     print(len(folio_client.locations))
+    print(folio_client.current_user)
 
 
 if __name__ == '__main__':

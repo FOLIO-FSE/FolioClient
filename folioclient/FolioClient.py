@@ -22,6 +22,19 @@ class FolioClient:
                               'content-type': 'application/json'}
 
     @cached_property
+    def current_user(self):
+        logging.info('fetching current user..')
+        try:
+            path = f'/bl-users/by-username/{self.username}'
+            resp = self.folio_get(path, 'user')
+            return resp['id']
+        except Exception as exception:
+            logging.error(
+                f'Unable to fetch user id for user {self.username}',
+                exc_info=exception)
+            return ''
+
+    @cached_property
     def identifier_types(self):
         return self.folio_get_all("/identifier-types",
                                   "identifierTypes",
@@ -176,21 +189,10 @@ class FolioClient:
             raise ValueError(("No location with code '{}' in locations. "
                               "No catch_all/default location either"))
 
-    def get_current_user(self):
-        try:
-            path = f'/bl-users/by-username/{self.username}'
-            resp = self.folio_get(path, 'user')
-            return resp['id']
-        except Exception as exception:
-            logging.error(
-                f'Unable to fetch user id for user {self.username}',
-                exc_info=exception)
-            return ''
-
     def get_metadata_construct(self):
         '''creates a metadata construct with the current API user_id
         attached'''
-        user_id = self.get_current_user()
+        user_id = self.current_user()
         df = '%Y-%m-%dT%H:%M:%S.%f+0000'
         return {
             "createdDate": datetime.utcnow().strftime(df),
