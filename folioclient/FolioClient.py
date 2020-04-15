@@ -1,7 +1,10 @@
 import json
 import logging
+import random
+import copy
 from datetime import datetime
 import hashlib
+import traceback
 import requests
 from folioclient.cached_property import cached_property
 
@@ -198,6 +201,106 @@ class FolioClient:
             "updatedByUserId": user_id,
         }
 
+    def create_request(
+        self, request_type, patron, item, service_point_id, request_date=datetime.now(),
+    ):
+        try:
+            df = "%Y-%m-%dT%H:%M:%S.%f+0000"
+            data = {
+                "requestType": request_type,
+                "fulfilmentPreference": "Hold Shelf",
+                "requester": {"barcode": patron["barcode"]},
+                "requesterId": patron["id"],
+                "item": {"barcode": item["barcode"]},
+                "itemId": item["id"],
+                "pickupServicePointId": service_point_id,
+                "requestDate": request_date.strftime(df),
+            }
+            path = "/circulation/requests"
+            url = f"{self.okapi_url}{path}"
+            print(f"POST {url}\t{json.dumps(data)}", flush=True)
+            req = requests.post(url, headers=self.okapi_headers, data=json.dumps(data))
+            print(req.status_code, flush=True)
+            if str(req.status_code) == "422":
+                print(
+                    f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(data)}",
+                    flush=True,
+                )
+            else:
+                print(req.status_code, flush=True)
+                # print(req.text)
+                req.raise_for_status()
+        except Exception as exception:
+            print(exception, flush=True)
+            traceback.print_exc()
+
+    def get_random_objects(self, path, count=1, query=""):
+        # TODO: add exception handling and logging
+        resp = self.folio_get(path)
+        total = int(resp["totalRecords"])
+        name = next(f for f in [*resp] if f != "totalRecords")
+        rand = random.randint(0, total)
+        query = f"?limit={count}&offset={rand}"
+        print(f"{total} {path} found, picking {count} from {rand} onwards")
+        return list(self.folio_get(path, name, query))
+
+    def check_out_by_barcode(
+        self, item_barcode, patron_barcode, loan_date: datetime, service_point_id
+    ):
+        # TODO: add logging instead of print out
+        try:
+            df = "%Y-%m-%dT%H:%M:%S.%f+0000"
+            data = {
+                "itemBarcode": item_barcode,
+                "userBarcode": patron_barcode,
+                "loanDate": loan_date.strftime(df),
+                "servicePointId": service_point_id,
+            }
+            path = "/circulation/check-out-by-barcode"
+            url = f"{self.okapi_url}{path}"
+            print(f"POST {url}\t{json.dumps(data)}", flush=True)
+            req = requests.post(url, headers=self.okapi_headers, data=json.dumps(data))
+            print(req.status_code, flush=True)
+            if str(req.status_code) == "422":
+                print(
+                    f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(data)}",
+                    flush=True,
+                )
+            elif str(req.status_code) == "201":
+                return json.loads(req.text)
+            else:
+                req.raise_for_status()
+        except Exception as exception:
+            traceback.print_exc()
+            print(exception, flush=True)
+
+    def extend_open_loan(self, loan, extention_due_date):
+        # TODO: add logging instead of print out
+        try:
+            df = "%Y-%m-%dT%H:%M:%S.%f+0000"
+            loan_to_put = copy.deepcopy(loan)
+            del loan_to_put["metadata"]
+            loan_to_put["dueDate"] = extention_due_date.strftime(df)
+            url = f"{self.okapi_url}/circulation/loans/{loan_to_put['id']}"
+            print(
+                f"PUT Extend loan to {loan_to_put['dueDate']}\t  {url}\t{json.dumps(loan_to_put)}",
+                flush=True,
+            )
+            req = requests.put(
+                url, headers=self.okapi_headers, data=json.dumps(loan_to_put)
+            )
+            print(req.status_code)
+            if str(req.status_code) == "422":
+                print(
+                    f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(loan_to_put)}",
+                    flush=True,
+                )
+            else:
+                req.raise_for_status()
+        except Exception as exception:
+            traceback.print_exc()
+            print(exception, flush=True)
+
     def get_loan_policy_id(
         self, item_type_id, loan_type_id, patron_group_id, location_id
     ):
@@ -221,6 +324,13 @@ class FolioClient:
         lp_id = json.loads(response.text)["loanPolicyId"]
         self.loan_policies[lp_hash] = lp_id
         return lp_id
+
+    def get_all_ids(self, path, query=""):
+        resp = self.folio_get(path)
+        name = next(f for f in [*resp] if f != "totalRecords")
+        gs = self.folio_get_all(path, name, query)
+        ids = [f["id"] for f in gs]
+        return ids
 
 
 def get_lp_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id):
