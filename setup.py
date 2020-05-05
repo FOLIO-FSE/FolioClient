@@ -1,14 +1,12 @@
 from distutils.core import setup
 
-with open("README.md", "r") as fh:
-    long_description = fh.read()
 
 setup(
     name="folioclient",
     packages=["folioclient"],
-    version="0.19",
+    version="0.20",
     license="MIT",
-    long_description=long_description,
+    long_description="",
     long_description_content_type="text/markdown",
     description="A simple wrapper over the FOLIO LMS system API:s",
     author="Theodor Tolstoy",
