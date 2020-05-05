@@ -23,6 +23,7 @@ def main():
     print(f"Fetched {len(random_users)} random users")
     print(folio_client.current_user)
     print(folio_client.get_metadata_construct())
+    print(len(folio_client.folio_get_all("/circulation/requests")))
 
 
 if __name__ == "__main__":

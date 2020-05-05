@@ -115,7 +115,7 @@ class FolioClient:
         """Fetches ALL data objects from FOLIO and turns
         it into a json object"""
         results = list()
-        limit = 100
+        limit = 10
         offset = 0
         q_template = "?limit={}&offset={}" if not query else "&limit={}&offset={}"
         q = query + q_template.format(limit, offset * limit)
@@ -129,7 +129,14 @@ class FolioClient:
                 path, key, query + q_template.format(limit, offset * limit)
             )
             results.extend(temp_res)
+        temp_res = self.folio_get(
+            path, key, query + q_template.format(limit, offset * limit)
+        )
+        results.extend(temp_res)
         return results
+
+    def get_all(self, path, key=None, query=""):
+        return self.folio_get_all(path, key, query)
 
     def folio_get(self, path, key=None, query=""):
         """Fetches data from FOLIO and turns it into a json object"""
@@ -258,19 +265,20 @@ class FolioClient:
             }
             path = "/circulation/check-out-by-barcode"
             url = f"{self.okapi_url}{path}"
-            print(f"POST {url}\t{json.dumps(data)}", flush=True)
             req = requests.post(url, headers=self.okapi_headers, data=json.dumps(data))
-            print(req.status_code, flush=True)
             if str(req.status_code) == "422":
                 print(
                     f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(data)}",
                     flush=True,
                 )
             elif str(req.status_code) == "201":
+                print(f"{req.status_code}\tPOST {url}", flush=True)
                 return json.loads(req.text)
             else:
                 req.raise_for_status()
         except Exception as exception:
+            print(f"{req.status_code}\tPOST {url}\t{json.dumps(data)}", flush=True)
+            print(req.text)
             traceback.print_exc()
             print(exception, flush=True)
 
@@ -282,14 +290,14 @@ class FolioClient:
             del loan_to_put["metadata"]
             loan_to_put["dueDate"] = extention_due_date.strftime(df)
             url = f"{self.okapi_url}/circulation/loans/{loan_to_put['id']}"
-            print(
-                f"PUT Extend loan to {loan_to_put['dueDate']}\t  {url}\t{json.dumps(loan_to_put)}",
-                flush=True,
-            )
+
             req = requests.put(
                 url, headers=self.okapi_headers, data=json.dumps(loan_to_put)
             )
-            print(req.status_code)
+            print(
+                f"{req.status_code}\tPUT Extend loan {loan_to_put['id']} to {loan_to_put['dueDate']}\t {url}",
+                flush=True,
+            )
             if str(req.status_code) == "422":
                 print(
                     f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(loan_to_put)}",
@@ -298,6 +306,10 @@ class FolioClient:
             else:
                 req.raise_for_status()
         except Exception as exception:
+            print(
+                f"{req.status_code}\tPUT Extend loan to {loan_to_put['dueDate']}\t {url}\t{json.dumps(loan_to_put)}",
+                flush=True,
+            )
             traceback.print_exc()
             print(exception, flush=True)
 
