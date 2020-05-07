@@ -4,7 +4,7 @@ from distutils.core import setup
 setup(
     name="folioclient",
     packages=["folioclient"],
-    version="0.21",
+    version="0.22",
     license="MIT",
     long_description="",
     long_description_content_type="text/markdown",
