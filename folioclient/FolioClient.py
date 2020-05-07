@@ -271,16 +271,18 @@ class FolioClient:
                     f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(data)}",
                     flush=True,
                 )
+                return False
             elif str(req.status_code) == "201":
                 print(f"{req.status_code}\tPOST {url}", flush=True)
-                return json.loads(req.text)
+                return True
             else:
                 req.raise_for_status()
+            return True
         except Exception as exception:
-            print(f"{req.status_code}\tPOST {url}\t{json.dumps(data)}", flush=True)
-            print(req.text)
+            print(f"\tPOST FAILED {url}\t{json.dumps(data)}", flush=True)
             traceback.print_exc()
             print(exception, flush=True)
+            return False
 
     def extend_open_loan(self, loan, extention_due_date):
         # TODO: add logging instead of print out
@@ -303,15 +305,18 @@ class FolioClient:
                     f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(loan_to_put)}",
                     flush=True,
                 )
+                return False
             else:
                 req.raise_for_status()
+            return True
         except Exception as exception:
             print(
-                f"{req.status_code}\tPUT Extend loan to {loan_to_put['dueDate']}\t {url}\t{json.dumps(loan_to_put)}",
+                f"PUT FAILED Extend loan to {loan_to_put['dueDate']}\t {url}\t{json.dumps(loan_to_put)}",
                 flush=True,
             )
             traceback.print_exc()
             print(exception, flush=True)
+            return False
 
     def get_loan_policy_id(
         self, item_type_id, loan_type_id, patron_group_id, location_id
