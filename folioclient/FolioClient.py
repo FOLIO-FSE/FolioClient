@@ -271,17 +271,17 @@ class FolioClient:
                     f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(data)}",
                     flush=True,
                 )
-                return (False, None)
+                return (False, None, json.loads(req.text)["errors"][0]["message"])
             elif str(req.status_code) == "201":
                 print(f"{req.status_code}\tPOST {url}", flush=True)
-                return (True, json.loads(req.text))
+                return (True, json.loads(req.text), None)
             else:
                 req.raise_for_status()
         except Exception as exception:
             print(f"\tPOST FAILED {url}\t{json.dumps(data)}", flush=True)
             traceback.print_exc()
             print(exception, flush=True)
-            return (False, None)
+            return (False, None, str(exception))
 
     def extend_open_loan(self, loan, extention_due_date):
         # TODO: add logging instead of print out
