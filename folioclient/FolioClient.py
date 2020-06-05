@@ -260,7 +260,7 @@ class FolioClient:
             data = {
                 "itemBarcode": item_barcode,
                 "userBarcode": patron_barcode,
-                "loanDate": loan_date.strftime(df),
+                "loanDate": loan_date.isoformat(),
                 "servicePointId": service_point_id,
             }
             path = "/circulation/check-out-by-barcode"
@@ -283,13 +283,14 @@ class FolioClient:
             print(exception, flush=True)
             return (False, None, str(exception))
 
-    def extend_open_loan(self, loan, extention_due_date):
+    def extend_open_loan(self, loan, extention_due_date, extend_out_date):
         # TODO: add logging instead of print out
         try:
             df = "%Y-%m-%dT%H:%M:%S.%f+0000"
             loan_to_put = copy.deepcopy(loan)
             del loan_to_put["metadata"]
-            loan_to_put["dueDate"] = extention_due_date.strftime(df)
+            loan_to_put["dueDate"] = extention_due_date.isoformat()
+            loan_to_put["loanDate"] = extend_out_date.isoformat()
             url = f"{self.okapi_url}/circulation/loans/{loan_to_put['id']}"
 
             req = requests.put(

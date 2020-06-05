@@ -1,5 +1,6 @@
 import argparse
 from folioclient.FolioClient import FolioClient
+import datetime
 
 
 def main():
@@ -24,6 +25,24 @@ def main():
     print(folio_client.current_user)
     print(folio_client.get_metadata_construct())
     print(len(folio_client.folio_get_all("/circulation/requests")))
+
+    df = "%Y-%m-%dT%H:%M:%S.%f+0000"
+
+    bc = {
+        "userBarcode": "6366520002522045",
+        "itemBarcode": "32356000869907",
+        "servicePointId": "83d474aa-ee99-4924-8704-a03e3c56e0d9",
+    }
+    loan = folio_client.check_out_by_barcode(
+        bc["itemBarcode"],
+        bc["userBarcode"],
+        datetime.datetime.now(),
+        bc["servicePointId"],
+    )
+    if loan:
+        folio_client.extend_open_loan(
+            loan[1], datetime.datetime.now(), datetime.datetime.now()
+        )
 
 
 if __name__ == "__main__":
