@@ -1,4 +1,5 @@
 import json
+import re
 import logging
 import random
 import copy
@@ -123,16 +124,23 @@ class FolioClient:
             path, key, query + q_template.format(limit, offset * limit)
         )
         results.extend(temp_res)
+        print(list(f["name"] for f in temp_res))
         while len(temp_res) == limit:
             offset += 1
             temp_res = self.folio_get(
                 path, key, query + q_template.format(limit, offset * limit)
             )
+            print(list(f["name"] for f in temp_res))
             results.extend(temp_res)
+        offset += 1
         temp_res = self.folio_get(
             path, key, query + q_template.format(limit, offset * limit)
         )
+        print(list(f["name"] for f in temp_res))
         results.extend(temp_res)
+        for r in results:
+            if not validate_uuid(r["id"]):
+                raise Exception(f"Bad UUID {r['id']} ({r}) in {path}")
         return results
 
     def get_all(self, path, key=None, query=""):
@@ -349,6 +357,14 @@ class FolioClient:
         ids = [f["id"] for f in gs]
         return ids
 
+    def put_user(self, user):
+        """Fetches data from FOLIO and turns it into a json object as is"""
+        url = f"{self.okapi_url}/users/{user['id']}"
+        print(url)
+        req = requests.put(url, headers=self.okapi_headers, data=json.dumps(user))
+        print(f"{req.status_code}")
+        req.raise_for_status()
+
 
 def get_lp_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id):
     return str(
@@ -360,3 +376,12 @@ def get_lp_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id
             ).encode("utf-8")
         ).hexdigest()
     )
+
+
+def validate_uuid(my_uuid):
+    reg = '"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"'
+    pattern = re.compile(reg)
+    if pattern.match(my_uuid):
+        return True
+    else:
+        return False
