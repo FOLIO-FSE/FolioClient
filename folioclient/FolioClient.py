@@ -124,19 +124,18 @@ class FolioClient:
             path, key, query + q_template.format(limit, offset * limit)
         )
         results.extend(temp_res)
-        print(list(f["name"] for f in temp_res))
         while len(temp_res) == limit:
             offset += 1
             temp_res = self.folio_get(
                 path, key, query + q_template.format(limit, offset * limit)
             )
-            print(list(f["name"] for f in temp_res))
+            # print(list(f["name"] for f in temp_res))
             results.extend(temp_res)
         offset += 1
         temp_res = self.folio_get(
             path, key, query + q_template.format(limit, offset * limit)
         )
-        print(list(f["name"] for f in temp_res))
+        # print(list(f["name"] for f in temp_res))
         results.extend(temp_res)
         for r in results:
             if not validate_uuid(r["id"]):
@@ -379,7 +378,7 @@ def get_lp_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id
 
 
 def validate_uuid(my_uuid):
-    reg = '"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"'
+    reg = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
     pattern = re.compile(reg)
     if pattern.match(my_uuid):
         return True
