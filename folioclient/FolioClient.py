@@ -183,6 +183,13 @@ class FolioClient:
         req = requests.get(url + path)
         return json.loads(req.text)
 
+    def get_user_schema(self):
+        """Fetches the JSON Schema for users"""
+        url = "https://raw.githubusercontent.com"
+        path = "/folio-org/mod-users/blob/master/ramls/userdata.json"
+        req = requests.get(url + path)
+        return json.loads(req.text)
+
     def get_location_id(self, location_code):
         """returns the location ID based on a location code"""
         try:
@@ -199,7 +206,7 @@ class FolioClient:
         except Exception as exception:
             raise ValueError(
                 (
-                    "No location with code '{}' in locations. "
+                    f"No location with code '{location_code}' in locations. "
                     "No catch_all/default location either"
                 )
             )
