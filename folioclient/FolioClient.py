@@ -115,7 +115,6 @@ class FolioClient:
     def folio_get_all(self, path, key=None, query=""):
         """Fetches ALL data objects from FOLIO and turns
         it into a json object"""
-        results = list()
         limit = 10
         offset = 0
         q_template = "?limit={}&offset={}" if not query else "&limit={}&offset={}"
@@ -123,24 +122,20 @@ class FolioClient:
         temp_res = self.folio_get(
             path, key, query + q_template.format(limit, offset * limit)
         )
-        results.extend(temp_res)
+        yield from temp_res
         while len(temp_res) == limit:
             offset += 1
             temp_res = self.folio_get(
                 path, key, query + q_template.format(limit, offset * limit)
             )
             # print(list(f["name"] for f in temp_res))
-            results.extend(temp_res)
+            yield from temp_res
         offset += 1
         temp_res = self.folio_get(
             path, key, query + q_template.format(limit, offset * limit)
         )
         # print(list(f["name"] for f in temp_res))
-        results.extend(temp_res)
-        for r in results:
-            if not validate_uuid(r["id"]):
-                raise Exception(f"Bad UUID {r['id']} ({r}) in {path}")
-        return results
+        yield from temp_res
 
     def get_all(self, path, key=None, query=""):
         return self.folio_get_all(path, key, query)

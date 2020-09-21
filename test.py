@@ -17,13 +17,13 @@ def main():
     folio_client = FolioClient(
         args.okapi_url, args.tenant_id, args.username, args.password
     )
-    print(f"Found {len(folio_client.locations)} locations")
-    print(f"Found {len(folio_client.identifier_types)} identifier_types")
+    print(f"Found {len(list(folio_client.locations))} locations")
+    print(f"Found {len(list(folio_client.identifier_types))} identifier_types")
 
     item_loan_types = folio_client.get_all_ids("/loan-types")
-    print(f"Fetched {len(item_loan_types)} item loan types")
+    print(f"Fetched {len(list(item_loan_types))} item loan types")
     random_users = folio_client.get_random_objects("/users", 10, "")
-    print(f"Fetched {len(random_users)} random users")
+    print(f"Fetched {len(list(random_users))} random users")
     print(folio_client.current_user)
     print(folio_client.get_metadata_construct())
     # print(len(folio_client.folio_get_all("/circulation/requests")))
