@@ -43,62 +43,77 @@ class FolioClient:
 
     @cached_property
     def identifier_types(self):
-        return self.folio_get_all("/identifier-types", "identifierTypes", self.cql_all)
+        return list(
+            self.folio_get_all("/identifier-types", "identifierTypes", self.cql_all)
+        )
 
     @cached_property
     def contributor_types(self):
-        return self.folio_get_all(
-            "/contributor-types", "contributorTypes", self.cql_all
+        return list(
+            self.folio_get_all("/contributor-types", "contributorTypes", self.cql_all)
         )
 
     @cached_property
     def contrib_name_types(self):
-        return self.folio_get_all(
-            "/contributor-name-types", "contributorNameTypes", self.cql_all
+        return list(
+            self.folio_get_all(
+                "/contributor-name-types", "contributorNameTypes", self.cql_all
+            )
         )
 
     @cached_property
     def instance_types(self):
-        return self.folio_get_all("/instance-types", "instanceTypes", self.cql_all)
+        return list(
+            self.folio_get_all("/instance-types", "instanceTypes", self.cql_all)
+        )
 
     @cached_property
     def instance_formats(self):
-        return self.folio_get_all("/instance-formats", "instanceFormats", self.cql_all)
-
-    def get_single_instance(self, instance_id):
-        return self.folio_get_all("inventory/instances/{}".format(instance_id))
+        return list(
+            self.folio_get_all("/instance-formats", "instanceFormats", self.cql_all)
+        )
 
     @cached_property
     def alt_title_types(self):
-        return self.folio_get_all(
-            "/alternative-title-types", "alternativeTitleTypes", self.cql_all
+        return list(
+            self.folio_get_all(
+                "/alternative-title-types", "alternativeTitleTypes", self.cql_all
+            )
         )
 
     @cached_property
     def locations(self):
-        return self.folio_get_all("/locations", "locations", self.cql_all)
+        return list(self.folio_get_all("/locations", "locations", self.cql_all))
 
     @cached_property
     def instance_note_types(self):
-        return self.folio_get_all(
-            "/instance-note-types", "instanceNoteTypes", self.cql_all
+        return list(
+            self.folio_get_all(
+                "/instance-note-types", "instanceNoteTypes", self.cql_all
+            )
         )
 
     @cached_property
     def class_types(self):
-        return self.folio_get_all(
-            "/classification-types", "classificationTypes", self.cql_all
+        return list(
+            self.folio_get_all(
+                "/classification-types", "classificationTypes", self.cql_all
+            )
         )
 
     @cached_property
     def organizations(self):
-        return self.folio_get_all(
-            "/organizations-storage/organizations", "organizations", self.cql_all
+        return list(
+            self.folio_get_all(
+                "/organizations-storage/organizations", "organizations", self.cql_all
+            )
         )
 
     @cached_property
     def modes_of_issuance(self):
-        return self.folio_get_all("/modes-of-issuance", "issuanceModes", self.cql_all)
+        return list(
+            self.folio_get_all("/modes-of-issuance", "issuanceModes", self.cql_all)
+        )
 
     def login(self):
         """Logs into FOLIO in order to get the okapi token"""
@@ -111,6 +126,9 @@ class FolioClient:
             raise ValueError("Request failed {}".format(req.status_code))
         self.okapi_token = req.headers.get("x-okapi-token")
         self.refresh_token = req.headers.get("refreshtoken")
+
+    def get_single_instance(self, instance_id):
+        return self.folio_get_all("inventory/instances/{}".format(instance_id))
 
     def folio_get_all(self, path, key=None, query=""):
         """Fetches ALL data objects from FOLIO and turns
@@ -259,38 +277,6 @@ class FolioClient:
         query = f"?limit={count}&offset={rand}"
         print(f"{total} {path} found, picking {count} from {rand} onwards")
         return list(self.folio_get(path, name, query))
-
-    def check_out_by_barcode(
-        self, item_barcode, patron_barcode, loan_date: datetime, service_point_id
-    ):
-        # TODO: add logging instead of print out
-        try:
-            df = "%Y-%m-%dT%H:%M:%S.%f+0000"
-            data = {
-                "itemBarcode": item_barcode,
-                "userBarcode": patron_barcode,
-                "loanDate": loan_date.isoformat(),
-                "servicePointId": service_point_id,
-            }
-            path = "/circulation/check-out-by-barcode"
-            url = f"{self.okapi_url}{path}"
-            req = requests.post(url, headers=self.okapi_headers, data=json.dumps(data))
-            if str(req.status_code) == "422":
-                print(
-                    f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(data)}",
-                    flush=True,
-                )
-                return (False, None, json.loads(req.text)["errors"][0]["message"])
-            elif str(req.status_code) == "201":
-                print(f"{req.status_code}\tPOST {url}", flush=True)
-                return (True, json.loads(req.text), None)
-            else:
-                req.raise_for_status()
-        except Exception as exception:
-            print(f"\tPOST FAILED {url}\t{json.dumps(data)}", flush=True)
-            traceback.print_exc()
-            print(exception, flush=True)
-            return (False, None, str(exception))
 
     def extend_open_loan(self, loan, extention_due_date, extend_out_date):
         # TODO: add logging instead of print out
