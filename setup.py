@@ -4,7 +4,7 @@ from distutils.core import setup
 setup(
     name="folioclient",
     packages=["folioclient"],
-    version="0.29",
+    version="0.30",
     license="MIT",
     long_description="",
     long_description_content_type="text/markdown",
@@ -12,7 +12,7 @@ setup(
     author="Theodor Tolstoy",
     author_email="pypi.teddes@tolstoy.se",
     url="https://github.com/fontanka16/FolioClient",
-    download_url="https://github.com/fontanka16/FolioClient/archive/v_018.tar.gz",
+    download_url="https://github.com/fontanka16/FolioClient/archive/v_030.tar.gz",
     keywords=["FOLIO", "FOLIO_LSP", "OKAPI", "API Wrapper"],
     install_requires=["requests"],  # I get to this in a second
     classifiers=[

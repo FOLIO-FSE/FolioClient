@@ -130,9 +130,7 @@ class FolioClient:
     @cached_property
     def call_number_types(self):
         return list(
-            self.folio_get_all(
-                "/call-number-types", "callNumberTypes", self.cql_all
-            )
+            self.folio_get_all("/call-number-types", "callNumberTypes", self.cql_all)
         )
 
     @cached_property
@@ -148,15 +146,15 @@ class FolioClient:
         path = "/authn/login"
         url = self.okapi_url + path
         req = requests.post(url, data=json.dumps(payload), headers=headers)
-        if req.status_code  == 201:
+        if req.status_code == 201:
             self.okapi_token = req.headers.get("x-okapi-token")
             self.refresh_token = req.headers.get("refreshtoken")
-        elif req.status_code == 422:            
+        elif req.status_code == 422:
             raise ValueError(f"HTTP {req.status_code}\t{req.text}")
-        elif req.status_code in [500, 413]:  
+        elif req.status_code in [500, 413]:
             raise ValueError(f"HTTP {req.status_code}\n{req.text} ")
         else:
-            raise ValueError(f"HTTP {req.status_code}\t{req.text}")        
+            raise ValueError(f"HTTP {req.status_code}\t{req.text}")
 
     def get_single_instance(self, instance_id):
         return self.folio_get_all("inventory/instances/{}".format(instance_id))
@@ -191,14 +189,14 @@ class FolioClient:
         """Fetches data from FOLIO and turns it into a json object"""
         url = self.okapi_url + path + query
         req = requests.get(url, headers=self.okapi_headers)
-        if req.status_code  == 200:
-            return json.loads(req.text)[key] if key else json.loads(req.text) 
-        elif req.status_code == 422:            
+        if req.status_code == 200:
+            return json.loads(req.text)[key] if key else json.loads(req.text)
+        elif req.status_code == 422:
             raise Exception(f"HTTP {req.status_code}\n{req.text}")
-        elif req.status_code in [500, 413]:  
+        elif req.status_code in [500, 413]:
             raise Exception(f"HTTP {req.status_code}\n{req.text} ")
         else:
-            raise Exception(f"HTTP {req.status_code}\n{req.text}")    
+            raise Exception(f"HTTP {req.status_code}\n{req.text}")
 
     def folio_get_single_object(self, path):
         """Fetches data from FOLIO and turns it into a json object as is"""
@@ -208,34 +206,44 @@ class FolioClient:
         result = json.loads(req.text)
         return result
 
-    def get_instance_json_schema(self):
+    def get_instance_json_schema(self, latest_release=True):
         """Fetches the JSON Schema for instances"""
-        url = "https://raw.github.com"
-        path = "/folio-org/mod-inventory-storage/master/ramls/instance.json"
-        req = requests.get(url + path)
-        return json.loads(req.text)
+        return self.get_latest_from_github(
+            "folio-org", "mod-inventory-storage", "/ramls/instance.json"
+        )
 
     def get_holdings_schema(self):
         """Fetches the JSON Schema for holdings"""
-        url = "https://raw.github.com"
-        path = "/folio-org/mod-inventory-storage/master/ramls/"
-        file_name = "holdingsrecord.json"
-        req = requests.get(url + path + file_name)
-        return json.loads(req.text)
+        return self.get_latest_from_github(
+            "folio-org", "mod-inventory-storage", "/ramls/holdingsrecord.json"
+        )
 
     def get_item_schema(self):
         """Fetches the JSON Schema for holdings"""
-        url = "https://raw.githubusercontent.com"
-        path = "/folio-org/mod-inventory-storage/master/ramls/item.json"
-        req = requests.get(url + path)
+        return self.get_latest_from_github(
+            "folio-org", "mod-inventory-storage", "/ramls/item.json"
+        )
+
+    def get_latest_from_github(self, owner, repo, filepath):
+        latest_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+        req = requests.get(latest_path)
+        req.raise_for_status()
+        latest = json.loads(req.text)
+        # print(json.dumps(latest, indent=4))
+        latest_tag = latest["tag_name"]
+        latest_path = (
+            f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
+        )
+        # print(latest_path)
+        req = requests.get(latest_path)
+        req.raise_for_status()
         return json.loads(req.text)
 
     def get_user_schema(self):
         """Fetches the JSON Schema for users"""
-        url = "https://raw.githubusercontent.com"
-        path = "/folio-org/mod-users/blob/master/ramls/userdata.json"
-        req = requests.get(url + path)
-        return json.loads(req.text)
+        return self.get_latest_from_github(
+            "folio-org", "mod-users", "/ramls/userdata.json"
+        )
 
     def get_location_id(self, location_code):
         """returns the location ID based on a location code"""
@@ -277,7 +285,7 @@ class FolioClient:
         service_point_id,
         request_date=datetime.now(),
     ):
-        '''For migrating open request. Deprecated.'''
+        """For migrating open request. Deprecated."""
         try:
             df = "%Y-%m-%dT%H:%M:%S.%f+0000"
             data = {
@@ -359,7 +367,9 @@ class FolioClient:
     ):
         """retrieves a loan policy from FOLIO, or uses a chached one"""
 
-        lp_hash = get_loan_policy_hash(item_type_id, loan_type_id, patron_group_id, location_id)
+        lp_hash = get_loan_policy_hash(
+            item_type_id, loan_type_id, patron_group_id, location_id
+        )
         if lp_hash in self.loan_policies:
             return self.loan_policies[lp_hash]
         payload = {
@@ -394,7 +404,9 @@ class FolioClient:
         req.raise_for_status()
 
 
-def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id):
+def get_loan_policy_hash(
+    item_type_id, loan_type_id, patron_type_id, shelving_location_id
+):
     return str(
         hashlib.sha224(
             (

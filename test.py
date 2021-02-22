@@ -17,6 +17,10 @@ def main():
     folio_client = FolioClient(
         args.okapi_url, args.tenant_id, args.username, args.password
     )
+    a = folio_client.get_instance_json_schema()
+    b = folio_client.get_item_schema()
+    c = folio_client.get_holdings_schema()
+    d = folio_client.get_user_schema()
     print(f"Found {len(list(folio_client.locations))} locations")
     print(f"Found {len(list(folio_client.identifier_types))} identifier_types")
 
