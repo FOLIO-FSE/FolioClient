@@ -86,6 +86,16 @@ class FolioClient:
         return list(self.folio_get_all("/locations", "locations", self.cql_all))
 
     @cached_property
+    def electronic_access_relationships(self):
+        return list(
+            self.folio_get_all(
+                "/electronic-access-relationships",
+                "electronicAccessRelationships",
+                self.cql_all,
+            )
+        )
+
+    @cached_property
     def instance_note_types(self):
         return list(
             self.folio_get_all(
@@ -110,6 +120,22 @@ class FolioClient:
         )
 
     @cached_property
+    def holding_note_types(self):
+        return list(
+            self.folio_get_all(
+                "/holdings-note-types", "holdingsNoteTypes", self.cql_all
+            )
+        )
+
+    @cached_property
+    def call_number_types(self):
+        return list(
+            self.folio_get_all(
+                "/call-number-types", "callNumberTypes", self.cql_all
+            )
+        )
+
+    @cached_property
     def modes_of_issuance(self):
         return list(
             self.folio_get_all("/modes-of-issuance", "issuanceModes", self.cql_all)
@@ -122,10 +148,15 @@ class FolioClient:
         path = "/authn/login"
         url = self.okapi_url + path
         req = requests.post(url, data=json.dumps(payload), headers=headers)
-        if req.status_code != 201:
-            raise ValueError("Request failed {}".format(req.status_code))
-        self.okapi_token = req.headers.get("x-okapi-token")
-        self.refresh_token = req.headers.get("refreshtoken")
+        if req.status_code  == 201:
+            self.okapi_token = req.headers.get("x-okapi-token")
+            self.refresh_token = req.headers.get("refreshtoken")
+        elif req.status_code == 422:            
+            raise ValueError(f"HTTP {req.status_code}\t{req.text}")
+        elif req.status_code in [500, 413]:  
+            raise ValueError(f"HTTP {req.status_code}\n{req.text} ")
+        else:
+            raise ValueError(f"HTTP {req.status_code}\t{req.text}")        
 
     def get_single_instance(self, instance_id):
         return self.folio_get_all("inventory/instances/{}".format(instance_id))
@@ -146,13 +177,11 @@ class FolioClient:
             temp_res = self.folio_get(
                 path, key, query + q_template.format(limit, offset * limit)
             )
-            # print(list(f["name"] for f in temp_res))
             yield from temp_res
         offset += 1
         temp_res = self.folio_get(
             path, key, query + q_template.format(limit, offset * limit)
         )
-        # print(list(f["name"] for f in temp_res))
         yield from temp_res
 
     def get_all(self, path, key=None, query=""):
@@ -162,9 +191,14 @@ class FolioClient:
         """Fetches data from FOLIO and turns it into a json object"""
         url = self.okapi_url + path + query
         req = requests.get(url, headers=self.okapi_headers)
-        req.raise_for_status()
-        result = json.loads(req.text)[key] if key else json.loads(req.text)
-        return result
+        if req.status_code  == 200:
+            return json.loads(req.text)[key] if key else json.loads(req.text) 
+        elif req.status_code == 422:            
+            raise Exception(f"HTTP {req.status_code}\n{req.text}")
+        elif req.status_code in [500, 413]:  
+            raise Exception(f"HTTP {req.status_code}\n{req.text} ")
+        else:
+            raise Exception(f"HTTP {req.status_code}\n{req.text}")    
 
     def folio_get_single_object(self, path):
         """Fetches data from FOLIO and turns it into a json object as is"""
@@ -236,8 +270,14 @@ class FolioClient:
         }
 
     def create_request(
-        self, request_type, patron, item, service_point_id, request_date=datetime.now(),
+        self,
+        request_type,
+        patron,
+        item,
+        service_point_id,
+        request_date=datetime.now(),
     ):
+        '''For migrating open request. Deprecated.'''
         try:
             df = "%Y-%m-%dT%H:%M:%S.%f+0000"
             data = {
@@ -280,6 +320,7 @@ class FolioClient:
 
     def extend_open_loan(self, loan, extention_due_date, extend_out_date):
         # TODO: add logging instead of print out
+        # Deprecated
         try:
             df = "%Y-%m-%dT%H:%M:%S.%f+0000"
             loan_to_put = copy.deepcopy(loan)
@@ -318,7 +359,7 @@ class FolioClient:
     ):
         """retrieves a loan policy from FOLIO, or uses a chached one"""
 
-        lp_hash = get_lp_hash(item_type_id, loan_type_id, patron_group_id, location_id)
+        lp_hash = get_loan_policy_hash(item_type_id, loan_type_id, patron_group_id, location_id)
         if lp_hash in self.loan_policies:
             return self.loan_policies[lp_hash]
         payload = {
@@ -353,7 +394,7 @@ class FolioClient:
         req.raise_for_status()
 
 
-def get_lp_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id):
+def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id):
     return str(
         hashlib.sha224(
             (
