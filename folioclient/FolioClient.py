@@ -132,6 +132,12 @@ class FolioClient:
         return list(
             self.folio_get_all("/call-number-types", "callNumberTypes", self.cql_all)
         )
+    
+    @cached_property
+    def holdings_types(self):
+        return list(
+            self.folio.folio_get_all("/holdings-types", "holdingsTypes")
+        )
 
     @cached_property
     def modes_of_issuance(self):
