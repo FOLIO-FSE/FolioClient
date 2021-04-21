@@ -48,6 +48,12 @@ class FolioClient:
         )
 
     @cached_property
+    def statistical_codes(self):
+        return list(
+            self.folio_get_all("/statistical-codes", "statisticalCodes", self.cql_all)
+        )
+
+    @cached_property
     def contributor_types(self):
         return list(
             self.folio_get_all("/contributor-types", "contributorTypes", self.cql_all)
