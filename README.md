@@ -1,5 +1,5 @@
 # FolioClient
-![example workflow](https://github.com/fontanka16/FolioClient/actions/workflows/python-app.yml/badge.svg)    
+![example workflow](https://github.com/fontanka16/FolioClient/actions/workflows/python-package.yml/badge.svg)    
 FOLIO Client is a simple python (3) wrapper over the FOLIO LMS system API:s
 
 ## Features
