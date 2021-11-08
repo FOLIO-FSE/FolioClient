@@ -6,13 +6,13 @@ setup(
     packages=["folioclient"],
     version="0.31",
     license="MIT",
-    long_description="",
+    long_description="file: README.md",
     long_description_content_type="text/markdown",
     description="A simple wrapper over the FOLIO LMS system API:s",
     author="Theodor Tolstoy",
     author_email="pypi.teddes@tolstoy.se",
     url="https://github.com/FOLIO-FSE/FolioClient/",
-    download_url="https://github.com/FOLIO-FSE/FolioClient/archive/v_030.tar.gz",
+    download_url="https://github.com/FOLIO-FSE/FolioClient/archive/v_031.tar.gz",
     keywords=["FOLIO", "FOLIO_LSP", "OKAPI", "API Wrapper"],
     install_requires=["requests"],  # I get to this in a second
     classifiers=[
