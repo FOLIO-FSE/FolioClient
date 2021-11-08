@@ -138,12 +138,10 @@ class FolioClient:
         return list(
             self.folio_get_all("/call-number-types", "callNumberTypes", self.cql_all)
         )
-    
+
     @cached_property
     def holdings_types(self):
-        return list(
-            self.folio.folio_get_all("/holdings-types", "holdingsTypes")
-        )
+        return list(self.folio.folio_get_all("/holdings-types", "holdingsTypes"))
 
     @cached_property
     def modes_of_issuance(self):
@@ -177,7 +175,6 @@ class FolioClient:
         limit = 10
         offset = 0
         q_template = "?limit={}&offset={}" if not query else "&limit={}&offset={}"
-        q = query + q_template.format(limit, offset * limit)
         temp_res = self.folio_get(
             path, key, query + q_template.format(limit, offset * limit)
         )
@@ -215,8 +212,7 @@ class FolioClient:
         url = self.okapi_url + path
         req = requests.get(url, headers=self.okapi_headers)
         req.raise_for_status()
-        result = json.loads(req.text)
-        return result
+        return json.loads(req.text)
 
     def get_instance_json_schema(self, latest_release=True):
         """Fetches the JSON Schema for instances"""
@@ -270,7 +266,7 @@ class FolioClient:
                     )
                 ),
             )
-        except Exception as exception:
+        except Exception:
             raise ValueError(
                 (
                     f"No location with code '{location_code}' in locations. "
@@ -310,8 +306,7 @@ class FolioClient:
                 "pickupServicePointId": service_point_id,
                 "requestDate": request_date.strftime(df),
             }
-            path = "/circulation/requests"
-            url = f"{self.okapi_url}{path}"
+            url = f"{self.okapi_url}/circulation/requests"
             print(f"POST {url}\t{json.dumps(data)}", flush=True)
             req = requests.post(url, headers=self.okapi_headers, data=json.dumps(data))
             print(req.status_code, flush=True)
@@ -342,7 +337,6 @@ class FolioClient:
         # TODO: add logging instead of print out
         # Deprecated
         try:
-            df = "%Y-%m-%dT%H:%M:%S.%f+0000"
             loan_to_put = copy.deepcopy(loan)
             del loan_to_put["metadata"]
             loan_to_put["dueDate"] = extention_due_date.isoformat()
@@ -404,8 +398,7 @@ class FolioClient:
         resp = self.folio_get(path)
         name = next(f for f in [*resp] if f != "totalRecords")
         gs = self.folio_get_all(path, name, query)
-        ids = [f["id"] for f in gs]
-        return ids
+        return [f["id"] for f in gs]
 
     def put_user(self, user):
         """Fetches data from FOLIO and turns it into a json object as is"""
@@ -433,7 +426,4 @@ def get_loan_policy_hash(
 def validate_uuid(my_uuid):
     reg = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
     pattern = re.compile(reg)
-    if pattern.match(my_uuid):
-        return True
-    else:
-        return False
+    return bool(pattern.match(my_uuid))

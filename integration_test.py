@@ -1,3 +1,5 @@
+"""This is a simple integration test class. Run it with 
+some credentials and it will try to fetch things for you."""
 import argparse
 from folioclient.FolioClient import FolioClient
 import datetime
@@ -18,9 +20,13 @@ def main():
         args.okapi_url, args.tenant_id, args.username, args.password
     )
     a = folio_client.get_instance_json_schema()
+    assert a
     b = folio_client.get_item_schema()
+    assert b
     c = folio_client.get_holdings_schema()
+    assert c
     d = folio_client.get_user_schema()
+    assert d
     print(f"Found {len(list(folio_client.locations))} locations")
     print(f"Found {len(list(folio_client.identifier_types))} identifier_types")
 
@@ -31,14 +37,14 @@ def main():
     print(folio_client.current_user)
     print(folio_client.get_metadata_construct())
     # print(len(folio_client.folio_get_all("/circulation/requests")))
-    print(list(t["name"] for t in folio_client.alt_title_types))
+    print([t["name"] for t in folio_client.alt_title_types])
     print(
-        list(
+        [
             t["name"]
             for t in folio_client.folio_get_all(
                 "/alternative-title-types", "alternativeTitleTypes"
             )
-        )
+        ]
     )
 
     df = "%Y-%m-%dT%H:%M:%S.%f+0000"
