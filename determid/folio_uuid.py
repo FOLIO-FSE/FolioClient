@@ -1,9 +1,9 @@
 import uuid
 
-from determid.folio_namespaces import FOLIONamespaces
+from folio_uuid.folio_namespaces import FOLIONamespaces
 
 
-class DetermId(uuid.UUID):
+class FolioUUID(uuid.UUID):
     """handles communication and getting values from FOLIO"""
 
     base_namespace = uuid.UUID("8405ae4d-b315-42e1-918a-d1919900cf3f")
@@ -23,5 +23,5 @@ class DetermId(uuid.UUID):
         legacy_identifier : str
             The actual identifier from the legacy system
         """
-        u = uuid.uuid5(folio_object_type.value, f"{tenant_id}-{legacy_identifier}")
-        super(DetermId, self).__init__(str(u))
+        u = uuid.uuid5(folio_object_type.value, f"{tenant_id}:{legacy_identifier}")
+        super(FolioUUID, self).__init__(str(u))
