@@ -57,7 +57,7 @@ class FolioUUID(uuid.UUID):
             An identifier of any kind.
 
         """
-        reg_pattern = r"^(\.?[a-z]?)([0-9xX]{6,8})(@\w{1,5})?$"
+        reg_pattern = r"^(\.?[bcoiv]?)([0-9xX]{6,8})(@\w{1,5})?$"
         match = re.search(reg_pattern, identifier)
         if not match or not match[1]:  # No match, no III id
             return identifier
