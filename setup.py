@@ -2,15 +2,13 @@ from distutils.core import setup
 
 from pathlib import Path
 
-this_directory = Path(__file__).parent
-long_description = (this_directory / "README.md").read_text()
 
 setup(
     name="folioclient",
     packages=["folioclient"],
-    version="0.33",
+    version="0.34",
     license="MIT",
-    long_description=long_description,
+    long_description="",
     long_description_content_type="text/markdown",
     description="A simple wrapper over the FOLIO LMS system API:s",
     author="Theodor Tolstoy",
