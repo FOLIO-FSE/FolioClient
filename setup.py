@@ -6,7 +6,7 @@ from pathlib import Path
 setup(
     name="folioclient",
     packages=["folioclient"],
-    version="0.34",
+    version="0.35",
     license="MIT",
     long_description="",
     long_description_content_type="text/markdown",
