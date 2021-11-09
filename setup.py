@@ -8,7 +8,7 @@ long_description = (this_directory / "README.md").read_text()
 setup(
     name="folioclient",
     packages=["folioclient"],
-    version="0.32",
+    version="0.33",
     license="MIT",
     long_description=long_description,
     long_description_content_type="text/markdown",
