@@ -11,14 +11,14 @@ class FolioUUID(uuid.UUID):
     base_namespace = uuid.UUID("8405ae4d-b315-42e1-918a-d1919900cf3f")
 
     def __init__(
-        self, tenant_id: str, folio_object_type: FOLIONamespaces, legacy_identifier: str
+        self, okapi_url: str, folio_object_type: FOLIONamespaces, legacy_identifier: str
     ):
         """
         Create a deterministic UUID for a FOLIO tenant
 
         Parameters
         ----------
-        tenant_id : str
+        okapi_url : str
             The tenant id (or other tenant string)
         folio_object_type : FOLIONamespaces
             Enum helping to avoid collisions within a tenant.
@@ -26,7 +26,7 @@ class FolioUUID(uuid.UUID):
             The actual identifier from the legacy system
         """
         clean_id = self.clean_iii_identifiers(legacy_identifier)
-        u = uuid.uuid5(folio_object_type.value, f"{tenant_id}:{clean_id}")
+        u = uuid.uuid5(folio_object_type.value, f"{okapi_url}:{clean_id}")
         super(FolioUUID, self).__init__(str(u))
 
     @staticmethod
