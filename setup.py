@@ -3,7 +3,7 @@ from distutils.core import setup
 setup(
     name="folioclient",
     packages=["folioclient"],
-    version="0.36",
+    version="0.37",
     license="MIT",
     long_description="",
     long_description_content_type="text/markdown",
@@ -11,7 +11,7 @@ setup(
     author="Theodor Tolstoy",
     author_email="pypi.teddes@tolstoy.se",
     url="https://github.com/FOLIO-FSE/FolioClient/",
-    download_url="https://github.com/FOLIO-FSE/FolioClient/archive/v_036.tar.gz",
+    download_url="https://github.com/FOLIO-FSE/FolioClient/archive/v_037.tar.gz",
     keywords=["FOLIO", "FOLIO_LSP", "OKAPI", "API Wrapper"],
     install_requires=["requests"],  # I get to this in a second
     classifiers=[
@@ -23,5 +23,9 @@ setup(
         "Programming Language :: Python :: 3.4",
         "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
     ],
 )
