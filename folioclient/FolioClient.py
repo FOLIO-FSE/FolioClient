@@ -169,10 +169,9 @@ class FolioClient:
     def get_single_instance(self, instance_id):
         return self.folio_get_all("inventory/instances/{}".format(instance_id))
 
-    def folio_get_all(self, path, key=None, query=""):
+    def folio_get_all(self, path, key=None, query="", limit=10):
         """Fetches ALL data objects from FOLIO and turns
         it into a json object"""
-        limit = 10
         offset = 0
         q_template = "?limit={}&offset={}" if not query else "&limit={}&offset={}"
         temp_res = self.folio_get(
