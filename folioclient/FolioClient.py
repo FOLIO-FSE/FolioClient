@@ -44,52 +44,60 @@ class FolioClient:
     @cached_property
     def identifier_types(self):
         return list(
-            self.folio_get_all("/identifier-types", "identifierTypes", self.cql_all)
+            self.folio_get_all(
+                "/identifier-types", "identifierTypes", self.cql_all, 1000
+            )
         )
 
     @cached_property
     def statistical_codes(self):
         return list(
-            self.folio_get_all("/statistical-codes", "statisticalCodes", self.cql_all)
+            self.folio_get_all(
+                "/statistical-codes", "statisticalCodes", self.cql_all, 1000
+            )
         )
 
     @cached_property
     def contributor_types(self):
         return list(
-            self.folio_get_all("/contributor-types", "contributorTypes", self.cql_all)
+            self.folio_get_all(
+                "/contributor-types", "contributorTypes", self.cql_all, 1000
+            )
         )
 
     @cached_property
     def contrib_name_types(self):
         return list(
             self.folio_get_all(
-                "/contributor-name-types", "contributorNameTypes", self.cql_all
+                "/contributor-name-types", "contributorNameTypes", self.cql_all, 1000
             )
         )
 
     @cached_property
     def instance_types(self):
         return list(
-            self.folio_get_all("/instance-types", "instanceTypes", self.cql_all)
+            self.folio_get_all("/instance-types", "instanceTypes", self.cql_all, 1000)
         )
 
     @cached_property
     def instance_formats(self):
         return list(
-            self.folio_get_all("/instance-formats", "instanceFormats", self.cql_all)
+            self.folio_get_all(
+                "/instance-formats", "instanceFormats", self.cql_all, 1000
+            )
         )
 
     @cached_property
     def alt_title_types(self):
         return list(
             self.folio_get_all(
-                "/alternative-title-types", "alternativeTitleTypes", self.cql_all
+                "/alternative-title-types", "alternativeTitleTypes", self.cql_all, 1000
             )
         )
 
     @cached_property
     def locations(self):
-        return list(self.folio_get_all("/locations", "locations", self.cql_all))
+        return list(self.folio_get_all("/locations", "locations", self.cql_all, 1000))
 
     @cached_property
     def electronic_access_relationships(self):
@@ -98,6 +106,7 @@ class FolioClient:
                 "/electronic-access-relationships",
                 "electronicAccessRelationships",
                 self.cql_all,
+                1000,
             )
         )
 
@@ -105,7 +114,7 @@ class FolioClient:
     def instance_note_types(self):
         return list(
             self.folio_get_all(
-                "/instance-note-types", "instanceNoteTypes", self.cql_all
+                "/instance-note-types", "instanceNoteTypes", self.cql_all, 1000
             )
         )
 
@@ -113,7 +122,7 @@ class FolioClient:
     def class_types(self):
         return list(
             self.folio_get_all(
-                "/classification-types", "classificationTypes", self.cql_all
+                "/classification-types", "classificationTypes", self.cql_all, 1000
             )
         )
 
@@ -121,7 +130,10 @@ class FolioClient:
     def organizations(self):
         return list(
             self.folio_get_all(
-                "/organizations-storage/organizations", "organizations", self.cql_all
+                "/organizations-storage/organizations",
+                "organizations",
+                self.cql_all,
+                1000,
             )
         )
 
@@ -129,24 +141,32 @@ class FolioClient:
     def holding_note_types(self):
         return list(
             self.folio_get_all(
-                "/holdings-note-types", "holdingsNoteTypes", self.cql_all
+                "/holdings-note-types", "holdingsNoteTypes", self.cql_all, 1000
             )
         )
 
     @cached_property
     def call_number_types(self):
         return list(
-            self.folio_get_all("/call-number-types", "callNumberTypes", self.cql_all)
+            self.folio_get_all(
+                "/call-number-types", "callNumberTypes", self.cql_all, 1000
+            )
         )
 
     @cached_property
     def holdings_types(self):
-        return list(self.folio.folio_get_all("/holdings-types", "holdingsTypes"))
+        return list(
+            self.folio.folio_get_all(
+                "/holdings-types", "holdingsTypes", self.cql_all, 1000
+            )
+        )
 
     @cached_property
     def modes_of_issuance(self):
         return list(
-            self.folio_get_all("/modes-of-issuance", "issuanceModes", self.cql_all)
+            self.folio_get_all(
+                "/modes-of-issuance", "issuanceModes", self.cql_all, 1000
+            )
         )
 
     def login(self):
