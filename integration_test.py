@@ -27,9 +27,15 @@ def main():
     assert c
     d = folio_client.get_user_schema()
     assert d
+    statistical_codes = list(
+        folio_client.folio_get_all(
+            "/statistical-codes", "statisticalCodes", "?query=cql.allRecords=1", 1000
+        )
+    )
+    print(f"{len(statistical_codes)} \tstatistical_codes")
+
     print(f"Found {len(list(folio_client.locations))} locations")
     print(f"Found {len(list(folio_client.identifier_types))} identifier_types")
-
     item_loan_types = folio_client.get_all_ids("/loan-types")
     print(f"Fetched {len(list(item_loan_types))} item loan types")
     random_users = folio_client.get_random_objects("/users", 10, "")

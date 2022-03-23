@@ -1,6 +1,7 @@
 import json
 import re
 import logging
+import yaml
 import random
 import copy
 from datetime import datetime
@@ -251,7 +252,8 @@ class FolioClient:
             "folio-org", "mod-inventory-storage", "/ramls/item.json"
         )
 
-    def get_latest_from_github(self, owner, repo, filepath):
+    @staticmethod
+    def get_latest_from_github(owner, repo, filepath: str):
         latest_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
         req = requests.get(latest_path)
         req.raise_for_status()
@@ -264,7 +266,12 @@ class FolioClient:
         # print(latest_path)
         req = requests.get(latest_path)
         req.raise_for_status()
-        return json.loads(req.text)
+        if filepath.endswith("json"):
+            return json.loads(req.text)
+        elif filepath.endswith("yaml"):
+            return yaml.safe_load(req.text)
+        else:
+            raise ValueError("Unknown file ending in %s", filepath)
 
     def get_user_schema(self):
         """Fetches the JSON Schema for users"""
