@@ -157,7 +157,7 @@ class FolioClient:
     @cached_property
     def holdings_types(self):
         return list(
-            self.folio.folio_get_all(
+            self.folio_get_all(
                 "/holdings-types", "holdingsTypes", self.cql_all, 1000
             )
         )
