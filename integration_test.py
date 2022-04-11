@@ -1,8 +1,9 @@
 """This is a simple integration test class. Run it with 
 some credentials and it will try to fetch things for you."""
 import argparse
-from folioclient.FolioClient import FolioClient
 import datetime
+
+from folioclient import FolioClient
 
 
 def main():
