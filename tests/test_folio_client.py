@@ -1,5 +1,4 @@
 import pytest
-
 from folioclient.FolioClient import FolioClient
 
 
