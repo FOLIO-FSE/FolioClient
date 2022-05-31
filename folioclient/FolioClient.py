@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import logging
+import os
 import random
 import re
 import traceback
@@ -224,6 +225,9 @@ class FolioClient:
         }
         if personal_access_token:
             github_headers["authorization"] = f"token {personal_access_token}"
+        elif os.environ.get("GITHUB_TOKEN"):
+            logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
+            github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         latest_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
         req = requests.get(latest_path, headers=github_headers)
         req.raise_for_status()
