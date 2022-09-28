@@ -236,7 +236,7 @@ class FolioClient:
         latest_tag = latest["tag_name"]
         latest_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
         # print(latest_path)
-        req = requests.get(latest_path)
+        req = requests.get(latest_path, headers=github_headers)
         req.raise_for_status()
         if filepath.endswith("json"):
             return json.loads(req.text)
@@ -256,9 +256,9 @@ class FolioClient:
                 (l["id"] for l in self.locations if location_code.strip() == l["code"]),
                 (
                     next(
-                        l["id"]
-                        for l in self.locations
-                        if l["code"] in ["catch_all", "default", "Default", "ATDM"]
+                        loc["id"]
+                        for loc in self.locations
+                        if loc["code"] in ["catch_all", "default", "Default", "ATDM"]
                     )
                 ),
             )
