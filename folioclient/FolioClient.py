@@ -32,7 +32,6 @@ class FolioClient:
             "content-type": "application/json",
         }
 
-    @cached_property
     def __repr__(self) -> str:
         return f"FolioClient for tenant {self.tenant_id} at {self.okapi_url} as {self.username}"
 
