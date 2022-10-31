@@ -33,6 +33,10 @@ class FolioClient:
         }
 
     @cached_property
+    def __repr__(self) -> str:
+        return f"FolioClient for tenant {self.tenant_id} at {self.okapi_url} as {self.username}"
+
+    @cached_property
     def current_user(self):
         logging.info("fetching current user..")
         try:
