@@ -2,6 +2,7 @@
 some credentials and it will try to fetch things for you."""
 import argparse
 import datetime
+import json
 
 from folioclient import FolioClient
 
@@ -17,9 +18,12 @@ def main():
     print("\tTenanti Id:\t", args.tenant_id)
     print("\tUsername:\t", args.username)
     print("\tPassword:\tSecret")
-    folio_client = FolioClient(
-        args.okapi_url, args.tenant_id, args.username, args.password
+    folio_client = FolioClient(args.okapi_url, args.tenant_id, args.username, args.password)
+    version = folio_client.get_module_version("mod-inventory-storage")
+    exact_schema = folio_client.get_from_github(
+        "folio-org", "mod-inventory-storage", "/ramls/instance.json"
     )
+    print(json.dumps(exact_schema))
     a = folio_client.get_instance_json_schema()
     assert a
     b = folio_client.get_item_schema()
@@ -34,9 +38,9 @@ def main():
         )
     )
     print(f"{len(statistical_codes)} \tstatistical_codes")
-
     print(f"Found {len(list(folio_client.locations))} locations")
     print(f"Found {len(list(folio_client.identifier_types))} identifier_types")
+
     item_loan_types = folio_client.get_all_ids("/loan-types")
     print(f"Fetched {len(list(item_loan_types))} item loan types")
     random_users = folio_client.get_random_objects("/users", 10, "")

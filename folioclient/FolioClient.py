@@ -48,6 +48,11 @@ class FolioClient:
         return list(self.folio_get_all("/identifier-types", "identifierTypes", self.cql_all, 1000))
 
     @cached_property
+    def module_versions(self):
+        resp = self.folio_get(f"/_/proxy/tenants/{self.tenant_id}/modules")
+        return [a["id"] for a in resp]
+
+    @cached_property
     def statistical_codes(self):
         return list(
             self.folio_get_all("/statistical-codes", "statisticalCodes", self.cql_all, 1000)
@@ -143,29 +148,29 @@ class FolioClient:
 
     def login(self):
         """Logs into FOLIO in order to get the okapi token"""
-        headers = {"x-okapi-tenant": self.tenant_id, "content-type": "application/json"}
         payload = {"username": self.username, "password": self.password}
-        path = "/authn/login"
-        url = self.okapi_url + path
+        headers = {
+            "x-okapi-tenant": self.tenant_id,
+            "content-type": "application/json",
+        }
+        url = f"{self.okapi_url}/authn/login"
         req = requests.post(url, data=json.dumps(payload), headers=headers)
         if req.status_code == 201:
             self.okapi_token = req.headers.get("x-okapi-token")
             self.refresh_token = req.headers.get("refreshtoken")
-        elif req.status_code == 422:
+        elif req.status_code == 422 or req.status_code not in [500, 413]:
             raise ValueError(f"HTTP {req.status_code}\t{req.text}")
-        elif req.status_code in [500, 413]:
-            raise ValueError(f"HTTP {req.status_code}\n{req.text} ")
         else:
-            raise ValueError(f"HTTP {req.status_code}\t{req.text}")
+            raise ValueError(f"HTTP {req.status_code}\n{req.text} ")
 
     def get_single_instance(self, instance_id):
-        return self.folio_get_all("inventory/instances/{}".format(instance_id))
+        return self.folio_get_all(f"inventory/instances/{instance_id}")
 
     def folio_get_all(self, path, key=None, query="", limit=10):
         """Fetches ALL data objects from FOLIO and turns
         it into a json object"""
         offset = 0
-        q_template = "?limit={}&offset={}" if not query else "&limit={}&offset={}"
+        q_template = "&limit={}&offset={}" if query else "?limit={}&offset={}"
         temp_res = self.folio_get(path, key, query + q_template.format(limit, offset * limit))
         yield from temp_res
         while len(temp_res) == limit:
@@ -173,8 +178,7 @@ class FolioClient:
             temp_res = self.folio_get(path, key, query + q_template.format(limit, offset * limit))
             yield from temp_res
         offset += 1
-        temp_res = self.folio_get(path, key, query + q_template.format(limit, offset * limit))
-        yield from temp_res
+        yield from self.folio_get(path, key, query + q_template.format(limit, offset * limit))
 
     def get_all(self, path, key=None, query=""):
         return self.folio_get_all(path, key, query)
@@ -201,21 +205,17 @@ class FolioClient:
 
     def get_instance_json_schema(self, latest_release=True):
         """Fetches the JSON Schema for instances"""
-        return self.get_latest_from_github(
-            "folio-org", "mod-inventory-storage", "/ramls/instance.json"
-        )
+        return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/instance.json")
 
     def get_holdings_schema(self):
         """Fetches the JSON Schema for holdings"""
-        return self.get_latest_from_github(
+        return self.get_from_github(
             "folio-org", "mod-inventory-storage", "/ramls/holdingsrecord.json"
         )
 
     def get_item_schema(self):
         """Fetches the JSON Schema for holdings"""
-        return self.get_latest_from_github(
-            "folio-org", "mod-inventory-storage", "/ramls/item.json"
-        )
+        return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/item.json")
 
     @staticmethod
     def get_latest_from_github(owner, repo, filepath: str, personal_access_token=""):
@@ -245,9 +245,53 @@ class FolioClient:
         else:
             raise ValueError("Unknown file ending in %s", filepath)
 
+    def get_from_github(self, owner, repo, filepath: str, personal_access_token=""):
+        version = self.get_module_version(repo)
+        github_headers = {
+            "content-type": "application/json",
+            "User-Agent": "Folio Client (https://github.com/FOLIO-FSE/FolioClient)",
+        }
+        if personal_access_token:
+            github_headers["authorization"] = f"token {personal_access_token}"
+        elif os.environ.get("GITHUB_TOKEN"):
+            logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
+            github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
+        if not version:
+            f_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+            req = requests.get(f_path, headers=github_headers)
+            req.raise_for_status()
+            latest = json.loads(req.text)
+            # print(json.dumps(latest, indent=4))
+            latest_tag = latest["tag_name"]
+            f_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
+        else:
+            f_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{version}/{filepath}"
+        # print(latest_path)
+        req = requests.get(f_path, headers=github_headers)
+        req.raise_for_status()
+        if filepath.endswith("json"):
+            return json.loads(req.text)
+        elif filepath.endswith("yaml"):
+            return yaml.safe_load(req.text)
+        else:
+            raise ValueError("Unknown file ending in %s", filepath)
+
+    def get_module_version(self, module_name: str):
+        if res := next(
+            (
+                f'v{a.replace(f"{module_name}-", "")}'
+                for a in self.module_versions
+                if a.startswith(module_name)
+            ),
+            "",
+        ):
+            return res
+        else:
+            raise ValueError(f"Module named {module_name} was not found in the tenant")
+
     def get_user_schema(self):
         """Fetches the JSON Schema for users"""
-        return self.get_latest_from_github("folio-org", "mod-users", "/ramls/userdata.json")
+        return self.get_from_github("folio-org", "mod-users", "/ramls/userdata.json")
 
     def get_location_id(self, location_code):
         """returns the location ID based on a location code"""
