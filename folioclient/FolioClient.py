@@ -8,7 +8,7 @@ import re
 import traceback
 from datetime import datetime
 
-import requests
+import httpx
 import yaml
 
 from folioclient.cached_property import cached_property
@@ -43,7 +43,10 @@ class FolioClient:
             resp = self.folio_get(path, "user")
             return resp["id"]
         except Exception as exception:
-            logging.error(f"Unable to fetch user id for user {self.username}", exc_info=exception)
+            logging.error(
+                "Unable to fetch user id for user {%self.username%}".format(self.username),
+                exc_info=exception,
+            )
             return ""
 
     @cached_property
@@ -157,7 +160,7 @@ class FolioClient:
             "content-type": "application/json",
         }
         url = f"{self.okapi_url}/authn/login"
-        req = requests.post(url, data=json.dumps(payload), headers=headers)
+        req = httpx.post(url, json=payload, headers=headers, timeout=None)
         if req.status_code == 201:
             self.okapi_token = req.headers.get("x-okapi-token")
             self.refresh_token = req.headers.get("refreshtoken")
@@ -189,24 +192,15 @@ class FolioClient:
     def folio_get(self, path, key=None, query=""):
         """Fetches data from FOLIO and turns it into a json object"""
         url = self.okapi_url + path + query
-        req = requests.get(url, headers=self.okapi_headers)
-        if req.status_code == 200:
-            return json.loads(req.text)[key] if key else json.loads(req.text)
-        elif req.status_code == 422:
-            raise Exception(f"HTTP {req.status_code}\n{req.text}")
-        elif req.status_code in [500, 413]:
-            raise Exception(f"HTTP {req.status_code}\n{req.text} ")
-        else:
-            raise Exception(f"HTTP {req.status_code}\n{req.text}")
+        req = httpx.get(url, headers=self.okapi_headers, timeout=None)
+        req.raise_for_status()
+        return json.loads(req.text)[key] if key else json.loads(req.text)
 
     def folio_get_single_object(self, path):
         """Fetches data from FOLIO and turns it into a json object as is"""
-        url = self.okapi_url + path
-        req = requests.get(url, headers=self.okapi_headers)
-        req.raise_for_status()
-        return json.loads(req.text)
+        return self.folio_get(path)
 
-    def get_instance_json_schema(self, latest_release=True):
+    def get_instance_json_schema(self):
         """Fetches the JSON Schema for instances"""
         return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/instance.json")
 
@@ -232,14 +226,14 @@ class FolioClient:
             logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
             github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         latest_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-        req = requests.get(latest_path, headers=github_headers)
+        req = httpx.get(latest_path, headers=github_headers, timeout=None, follow_redirects=True)
         req.raise_for_status()
         latest = json.loads(req.text)
         # print(json.dumps(latest, indent=4))
         latest_tag = latest["tag_name"]
         latest_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
         # print(latest_path)
-        req = requests.get(latest_path, headers=github_headers)
+        req = httpx.get(latest_path, headers=github_headers, timeout=None, follow_redirects=True)
         req.raise_for_status()
         if filepath.endswith("json"):
             return json.loads(req.text)
@@ -261,7 +255,7 @@ class FolioClient:
             github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         if not version:
             f_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-            req = requests.get(f_path, headers=github_headers)
+            req = httpx.get(f_path, headers=github_headers, timeout=None, follow_redirects=True)
             req.raise_for_status()
             latest = json.loads(req.text)
             # print(json.dumps(latest, indent=4))
@@ -270,7 +264,7 @@ class FolioClient:
         else:
             f_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{version}/{filepath}"
         # print(latest_path)
-        req = requests.get(f_path, headers=github_headers)
+        req = httpx.get(f_path, headers=github_headers, timeout=None, follow_redirects=True)
         req.raise_for_status()
         if filepath.endswith("json"):
             return json.loads(req.text)
@@ -309,13 +303,13 @@ class FolioClient:
                     )
                 ),
             )
-        except Exception:
+        except Exception as exc:
             raise ValueError(
                 (
                     f"No location with code '{location_code}' in locations. "
                     "No catch_all/default location either"
                 )
-            )
+            ) from exc
 
     def get_metadata_construct(self):
         """creates a metadata construct with the current API user_id
@@ -351,7 +345,7 @@ class FolioClient:
             }
             url = f"{self.okapi_url}/circulation/requests"
             print(f"POST {url}\t{json.dumps(data)}", flush=True)
-            req = requests.post(url, headers=self.okapi_headers, data=json.dumps(data))
+            req = httpx.post(url, headers=self.okapi_headers, json=data, timeout=None)
             print(req.status_code, flush=True)
             if str(req.status_code) == "422":
                 print(
@@ -386,7 +380,7 @@ class FolioClient:
             loan_to_put["loanDate"] = extend_out_date.isoformat()
             url = f"{self.okapi_url}/circulation/loans/{loan_to_put['id']}"
 
-            req = requests.put(url, headers=self.okapi_headers, data=json.dumps(loan_to_put))
+            req = httpx.put(url, headers=self.okapi_headers, json=loan_to_put, timeout=None)
             print(
                 f"{req.status_code}\tPUT Extend loan {loan_to_put['id']} to {loan_to_put['dueDate']}\t {url}",
                 flush=True,
@@ -422,7 +416,7 @@ class FolioClient:
             "location_id": location_id,
         }
         path = f"{self.okapi_url}/circulation/rules/loan-policy"
-        response = requests.get(path, params=payload, headers=self.okapi_headers)
+        response = httpx.get(path, params=payload, headers=self.okapi_headers, timeout=None)
         if response.status_code != 200:
             print(response.status_code)
             print(response.text)
@@ -441,7 +435,7 @@ class FolioClient:
         """Fetches data from FOLIO and turns it into a json object as is"""
         url = f"{self.okapi_url}/users/{user['id']}"
         print(url)
-        req = requests.put(url, headers=self.okapi_headers, data=json.dumps(user))
+        req = httpx.put(url, headers=self.okapi_headers, json=user)
         print(f"{req.status_code}")
         req.raise_for_status()
 
