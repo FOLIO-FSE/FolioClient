@@ -1,11 +1,9 @@
-import copy
 import hashlib
 import json
 import logging
 import os
 import random
 import re
-import traceback
 from datetime import datetime
 
 import httpx
@@ -31,6 +29,7 @@ class FolioClient:
             "x-okapi-tenant": self.tenant_id,
             "content-type": "application/json",
         }
+        self.httpx_client = None
 
     def __repr__(self) -> str:
         return f"FolioClient for tenant {self.tenant_id} at {self.okapi_url} as {self.username}"
@@ -43,10 +42,7 @@ class FolioClient:
             resp = self.folio_get(path, "user")
             return resp["id"]
         except Exception as exception:
-            logging.error(
-                "Unable to fetch user id for user {%self.username%}".format(self.username),
-                exc_info=exception,
-            )
+            logging.error(f"Unable to fetch user id for user {self.username}", exc_info=exception)
             return ""
 
     @cached_property
@@ -175,16 +171,20 @@ class FolioClient:
     def folio_get_all(self, path, key=None, query="", limit=10):
         """Fetches ALL data objects from FOLIO and turns
         it into a json object"""
-        offset = 0
-        q_template = "&limit={}&offset={}" if query else "?limit={}&offset={}"
-        temp_res = self.folio_get(path, key, query + q_template.format(limit, offset * limit))
-        yield from temp_res
-        while len(temp_res) == limit:
-            offset += 1
+        with httpx.Client(headers=self.okapi_headers, timeout=None) as httpx_client:
+            self.httpx_client = httpx_client
+            offset = 0
+            q_template = "&limit={}&offset={}" if query else "?limit={}&offset={}"
             temp_res = self.folio_get(path, key, query + q_template.format(limit, offset * limit))
             yield from temp_res
-        offset += 1
-        yield from self.folio_get(path, key, query + q_template.format(limit, offset * limit))
+            while len(temp_res) == limit:
+                offset += 1
+                temp_res = self.folio_get(
+                    path, key, query + q_template.format(limit, offset * limit)
+                )
+                yield from temp_res
+            offset += 1
+            yield from self.folio_get(path, key, query + q_template.format(limit, offset * limit))
 
     def get_all(self, path, key=None, query=""):
         return self.folio_get_all(path, key, query)
@@ -192,9 +192,13 @@ class FolioClient:
     def folio_get(self, path, key=None, query=""):
         """Fetches data from FOLIO and turns it into a json object"""
         url = self.okapi_url + path + query
-        req = httpx.get(url, headers=self.okapi_headers, timeout=None)
-        req.raise_for_status()
-        return json.loads(req.text)[key] if key else json.loads(req.text)
+        if self.httpx_client and not self.httpx_client.is_closed:
+            req = self.httpx_client.get(url)
+            req.raise_for_status()
+        else:
+            req = httpx.get(url, headers=self.okapi_headers, timeout=None)
+            req.raise_for_status()
+        return req.json()[key] if key else req.json()
 
     def folio_get_single_object(self, path):
         """Fetches data from FOLIO and turns it into a json object as is"""
@@ -322,44 +326,6 @@ class FolioClient:
             "updatedByUserId": user_id,
         }
 
-    def create_request(
-        self,
-        request_type,
-        patron,
-        item,
-        service_point_id,
-        request_date=datetime.now(),
-    ):
-        """For migrating open request. Deprecated."""
-        try:
-            df = "%Y-%m-%dT%H:%M:%S.%f+0000"
-            data = {
-                "requestType": request_type,
-                "fulfilmentPreference": "Hold Shelf",
-                "requester": {"barcode": patron["barcode"]},
-                "requesterId": patron["id"],
-                "item": {"barcode": item["barcode"]},
-                "itemId": item["id"],
-                "pickupServicePointId": service_point_id,
-                "requestDate": request_date.strftime(df),
-            }
-            url = f"{self.okapi_url}/circulation/requests"
-            print(f"POST {url}\t{json.dumps(data)}", flush=True)
-            req = httpx.post(url, headers=self.okapi_headers, json=data, timeout=None)
-            print(req.status_code, flush=True)
-            if str(req.status_code) == "422":
-                print(
-                    f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(data)}",
-                    flush=True,
-                )
-            else:
-                print(req.status_code, flush=True)
-                # print(req.text)
-                req.raise_for_status()
-        except Exception as exception:
-            print(exception, flush=True)
-            traceback.print_exc()
-
     def get_random_objects(self, path, count=1, query=""):
         # TODO: add exception handling and logging
         resp = self.folio_get(path)
@@ -369,39 +335,6 @@ class FolioClient:
         query = f"?limit={count}&offset={rand}"
         print(f"{total} {path} found, picking {count} from {rand} onwards")
         return list(self.folio_get(path, name, query))
-
-    def extend_open_loan(self, loan, extention_due_date, extend_out_date):
-        # TODO: add logging instead of print out
-        # Deprecated
-        try:
-            loan_to_put = copy.deepcopy(loan)
-            del loan_to_put["metadata"]
-            loan_to_put["dueDate"] = extention_due_date.isoformat()
-            loan_to_put["loanDate"] = extend_out_date.isoformat()
-            url = f"{self.okapi_url}/circulation/loans/{loan_to_put['id']}"
-
-            req = httpx.put(url, headers=self.okapi_headers, json=loan_to_put, timeout=None)
-            print(
-                f"{req.status_code}\tPUT Extend loan {loan_to_put['id']} to {loan_to_put['dueDate']}\t {url}",
-                flush=True,
-            )
-            if str(req.status_code) == "422":
-                print(
-                    f"{json.loads(req.text)['errors'][0]['message']}\t{json.dumps(loan_to_put)}",
-                    flush=True,
-                )
-                return False
-            else:
-                req.raise_for_status()
-            return True
-        except Exception as exception:
-            print(
-                f"PUT FAILED Extend loan to {loan_to_put['dueDate']}\t {url}\t{json.dumps(loan_to_put)}",
-                flush=True,
-            )
-            traceback.print_exc()
-            print(exception, flush=True)
-            return False
 
     def get_loan_policy_id(self, item_type_id, loan_type_id, patron_group_id, location_id):
         """retrieves a loan policy from FOLIO, or uses a chached one"""
