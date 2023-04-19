@@ -1,6 +1,6 @@
 import pytest
 from folioclient import FolioClient
-from requests.exceptions import HTTPError
+from httpx import HTTPError
 
 
 def test_first():
