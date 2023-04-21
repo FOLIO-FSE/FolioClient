@@ -219,7 +219,7 @@ class FolioClient:
         return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/item.json")
 
     @staticmethod
-    def get_latest_from_github(owner, repo, filepath: str, personal_access_token=""):
+    def get_latest_from_github(owner, repo, filepath: str, personal_access_token=""):  # noqa: S107
         github_headers = {
             "content-type": "application/json",
             "User-Agent": "Folio Client (https://github.com/FOLIO-FSE/FolioClient)",
@@ -246,7 +246,7 @@ class FolioClient:
         else:
             raise ValueError("Unknown file ending in %s", filepath)
 
-    def get_from_github(self, owner, repo, filepath: str, personal_access_token=""):
+    def get_from_github(self, owner, repo, filepath: str, personal_access_token=""):  # noqa: S107
         version = self.get_module_version(repo)
         github_headers = {
             "content-type": "application/json",
@@ -331,7 +331,7 @@ class FolioClient:
         resp = self.folio_get(path)
         total = int(resp["totalRecords"])
         name = next(f for f in [*resp] if f != "totalRecords")
-        rand = random.randint(0, total)
+        rand = random.randint(0, total)  # noqa
         query = f"?limit={count}&offset={rand}"
         print(f"{total} {path} found, picking {count} from {rand} onwards")
         return list(self.folio_get(path, name, query))
@@ -384,6 +384,6 @@ def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_lo
 
 
 def validate_uuid(my_uuid):
-    reg = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    reg = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"  # noqa
     pattern = re.compile(reg)
     return bool(pattern.match(my_uuid))
