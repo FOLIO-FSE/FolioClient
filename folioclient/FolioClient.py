@@ -331,7 +331,7 @@ class FolioClient:
         resp = self.folio_get(path)
         total = int(resp["totalRecords"])
         name = next(f for f in [*resp] if f != "totalRecords")
-        rand = random.randint(0, total)  # noqa
+        rand = random.randint(0, total)  # noqa # NOSONAR not used in secure context
         query = f"?limit={count}&offset={rand}"
         print(f"{total} {path} found, picking {count} from {rand} onwards")
         return list(self.folio_get(path, name, query))
