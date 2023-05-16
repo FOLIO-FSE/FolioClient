@@ -1,10 +1,10 @@
 import pytest
 from folioclient import FolioClient
-from httpx import HTTPError
+from httpx import HTTPError, UnsupportedProtocol
 
 
 def test_first():
-    with pytest.raises(ValueError):
+    with pytest.raises(UnsupportedProtocol):
         FolioClient("", "", "", "")
 
 
