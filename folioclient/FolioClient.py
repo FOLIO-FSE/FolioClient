@@ -15,7 +15,7 @@ from folioclient.cached_property import cached_property
 class FolioClient:
     """handles communication and getting values from FOLIO"""
 
-    def __init__(self, okapi_url, tenant_id, username, password):
+    def __init__(self, okapi_url, tenant_id, username, password, ssl_verify=True):
         self.missing_location_codes = set()
         self.loan_policies = {}
         self.cql_all = "?query=cql.allRecords=1"
@@ -23,6 +23,7 @@ class FolioClient:
         self.tenant_id = tenant_id
         self.username = username
         self.password = password
+        self.ssl_verify = ssl_verify
         self.login()
         self.okapi_headers = {
             "x-okapi-token": self.okapi_token,
@@ -156,7 +157,7 @@ class FolioClient:
             "content-type": "application/json",
         }
         url = f"{self.okapi_url}/authn/login"
-        req = httpx.post(url, json=payload, headers=headers, timeout=None)
+        req = httpx.post(url, json=payload, headers=headers, timeout=None, verify=self.ssl_verify)
         if req.status_code == 201:
             self.okapi_token = req.headers.get("x-okapi-token")
             self.refresh_token = req.headers.get("refreshtoken")
@@ -171,7 +172,7 @@ class FolioClient:
     def folio_get_all(self, path, key=None, query="", limit=10):
         """Fetches ALL data objects from FOLIO and turns
         it into a json object"""
-        with httpx.Client(headers=self.okapi_headers, timeout=None) as httpx_client:
+        with httpx.Client(headers=self.okapi_headers, timeout=None, verify=self.ssl_verify) as httpx_client:
             self.httpx_client = httpx_client
             offset = 0
             q_template = "&limit={}&offset={}" if query else "?limit={}&offset={}"
@@ -196,7 +197,7 @@ class FolioClient:
             req = self.httpx_client.get(url)
             req.raise_for_status()
         else:
-            req = httpx.get(url, headers=self.okapi_headers, timeout=None)
+            req = httpx.get(url, headers=self.okapi_headers, timeout=None, verify=self.ssl_verify)
             req.raise_for_status()
         return req.json()[key] if key else req.json()
 
@@ -219,7 +220,7 @@ class FolioClient:
         return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/item.json")
 
     @staticmethod
-    def get_latest_from_github(owner, repo, filepath: str, personal_access_token=""):  # noqa: S107
+    def get_latest_from_github(owner, repo, filepath: str, personal_access_token="", ssl_verify=True):  # noqa: S107
         github_headers = {
             "content-type": "application/json",
             "User-Agent": "Folio Client (https://github.com/FOLIO-FSE/FolioClient)",
@@ -230,14 +231,14 @@ class FolioClient:
             logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
             github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         latest_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-        req = httpx.get(latest_path, headers=github_headers, timeout=None, follow_redirects=True)
+        req = httpx.get(latest_path, headers=github_headers, timeout=None, follow_redirects=True, verify=ssl_verify)
         req.raise_for_status()
         latest = json.loads(req.text)
         # print(json.dumps(latest, indent=4))
         latest_tag = latest["tag_name"]
         latest_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
         # print(latest_path)
-        req = httpx.get(latest_path, headers=github_headers, timeout=None, follow_redirects=True)
+        req = httpx.get(latest_path, headers=github_headers, timeout=None, follow_redirects=True, verify=ssl_verify)
         req.raise_for_status()
         if filepath.endswith("json"):
             return json.loads(req.text)
@@ -246,7 +247,7 @@ class FolioClient:
         else:
             raise ValueError("Unknown file ending in %s", filepath)
 
-    def get_from_github(self, owner, repo, filepath: str, personal_access_token=""):  # noqa: S107
+    def get_from_github(self, owner, repo, filepath: str, personal_access_token="", ssl_verify=True):  # noqa: S107
         version = self.get_module_version(repo)
         github_headers = {
             "content-type": "application/json",
@@ -259,7 +260,7 @@ class FolioClient:
             github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         if not version:
             f_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-            req = httpx.get(f_path, headers=github_headers, timeout=None, follow_redirects=True)
+            req = httpx.get(f_path, headers=github_headers, timeout=None, follow_redirects=True, verify=ssl_verify)
             req.raise_for_status()
             latest = json.loads(req.text)
             # print(json.dumps(latest, indent=4))
@@ -268,7 +269,7 @@ class FolioClient:
         else:
             f_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{version}/{filepath}"
         # print(latest_path)
-        req = httpx.get(f_path, headers=github_headers, timeout=None, follow_redirects=True)
+        req = httpx.get(f_path, headers=github_headers, timeout=None, follow_redirects=True, verify=ssl_verify)
         req.raise_for_status()
         if filepath.endswith("json"):
             return json.loads(req.text)
@@ -349,7 +350,7 @@ class FolioClient:
             "location_id": location_id,
         }
         path = f"{self.okapi_url}/circulation/rules/loan-policy"
-        response = httpx.get(path, params=payload, headers=self.okapi_headers, timeout=None)
+        response = httpx.get(path, params=payload, headers=self.okapi_headers, timeout=None, verify=self.ssl_verify)
         if response.status_code != 200:
             print(response.status_code)
             print(response.text)
@@ -368,7 +369,7 @@ class FolioClient:
         """Fetches data from FOLIO and turns it into a json object as is"""
         url = f"{self.okapi_url}/users/{user['id']}"
         print(url)
-        req = httpx.put(url, headers=self.okapi_headers, json=user)
+        req = httpx.put(url, headers=self.okapi_headers, json=user, verify=self.ssl_verify)
         print(f"{req.status_code}")
         req.raise_for_status()
 
