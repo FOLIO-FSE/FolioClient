@@ -5,6 +5,7 @@ import os
 import random
 import re
 from datetime import datetime
+from typing import Dict, Any
 
 import httpx
 import yaml
@@ -170,34 +171,64 @@ class FolioClient:
         return self.folio_get_all(f"inventory/instances/{instance_id}")
 
     def folio_get_all(self, path, key=None, query="", limit=10):
-        """Fetches ALL data objects from FOLIO and turns
-        it into a json object"""
+        """
+        Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
+        an iterable object yielding a single record at a time until all records have been returned.
+        """
         with httpx.Client(headers=self.okapi_headers, timeout=None, verify=self.ssl_verify) as httpx_client:
             self.httpx_client = httpx_client
             offset = 0
-            q_template = "&limit={}&offset={}" if query else "?limit={}&offset={}"
-            temp_res = self.folio_get(path, key, query + q_template.format(limit, offset * limit))
+            query_params: Dict[str, Any] = self._construct_query_parameters(
+                query=query, limit=limit, offset=offset * limit
+            )
+            temp_res = self.folio_get(path, key, query_params=query_params)
             yield from temp_res
             while len(temp_res) == limit:
                 offset += 1
                 temp_res = self.folio_get(
-                    path, key, query + q_template.format(limit, offset * limit)
+                    path, key, query_params=self._construct_query_parameters(
+                        query=query, limit=limit, offset=offset * limit
+                    )
                 )
                 yield from temp_res
             offset += 1
-            yield from self.folio_get(path, key, query + q_template.format(limit, offset * limit))
+            yield from self.folio_get(path, key, query_params=self._construct_query_parameters(
+                query=query, limit=limit, offset=offset * limit
+            ))
+
+    def _construct_query_parameters(self, **kwargs) -> Dict[str, Any]:
+        """Private method to construct query parameters for folio_get or httpx client calls"""
+        params = kwargs
+        if query := kwargs.get("query"):
+            if query.startswith(("?", "query=")):  # Handle previous query specification syntax
+                params["query"] = query.split("=", maxsplit=1)[1]
+            elif kwargs.get("query"):
+                params["query"] = query
+        return params
 
     def get_all(self, path, key=None, query=""):
+        """Alias for `folio_get_all`"""
         return self.folio_get_all(path, key, query)
 
-    def folio_get(self, path, key=None, query=""):
-        """Fetches data from FOLIO and turns it into a json object"""
-        url = self.okapi_url + path + query
+    def folio_get(self, path, key=None, query="", query_params=None):
+        """
+        Fetches data from FOLIO and turns it into a json object
+        * path: FOLIO API endpoint path
+        * key: Key in JSON response from FOLIO that includes the array of results for query APIs
+        * query: For backwards-compatibility
+        * query_params: If applying a `sortBy` statement to your query, the query should be 
+                        specified last
+        """
+        url = self.okapi_url + path
+        if query and query_params:
+            query_params = self._construct_query_parameters(query=query, **query_params)
+        elif query:
+            query_params = self._construct_query_parameters(query=query)
         if self.httpx_client and not self.httpx_client.is_closed:
-            req = self.httpx_client.get(url)
+            req = self.httpx_client.get(url, params=query_params)
             req.raise_for_status()
         else:
-            req = httpx.get(url, headers=self.okapi_headers, timeout=None, verify=self.ssl_verify)
+            req = httpx.get(url, params=query_params, headers=self.okapi_headers, timeout=None, verify=self.ssl_verify)
             req.raise_for_status()
         return req.json()[key] if key else req.json()
 
@@ -333,9 +364,11 @@ class FolioClient:
         total = int(resp["totalRecords"])
         name = next(f for f in [*resp] if f != "totalRecords")
         rand = random.randint(0, total)  # noqa # NOSONAR not used in secure context
-        query = f"?limit={count}&offset={rand}"
+        query_params = {}
+        query_params["limit"] = count
+        query_params["offset"] = rand
         print(f"{total} {path} found, picking {count} from {rand} onwards")
-        return list(self.folio_get(path, name, query))
+        return list(self.folio_get(path, name, query_params=query_params))
 
     def get_loan_policy_id(self, item_type_id, loan_type_id, patron_group_id, location_id):
         """retrieves a loan policy from FOLIO, or uses a chached one"""
