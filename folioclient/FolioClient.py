@@ -170,16 +170,18 @@ class FolioClient:
     def get_single_instance(self, instance_id):
         return self.folio_get_all(f"inventory/instances/{instance_id}")
 
-    def folio_get_all(self, path, key=None, query="", limit=10):
+    def folio_get_all(self, path, key=None, query=None, limit=10, **kwargs):
         """
         Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
         an iterable object yielding a single record at a time until all records have been returned.
+        - kwargs are passed as additional url parameters to `path`
         """
         with httpx.Client(headers=self.okapi_headers, timeout=None, verify=self.ssl_verify) as httpx_client:
             self.httpx_client = httpx_client
             offset = 0
+            query = query or " ".join((self.cql_all, "sortBy id"))
             query_params: Dict[str, Any] = self._construct_query_parameters(
-                query=query, limit=limit, offset=offset * limit
+                query=query, limit=limit, offset=offset * limit, **kwargs
             )
             temp_res = self.folio_get(path, key, query_params=query_params)
             yield from temp_res
@@ -187,13 +189,13 @@ class FolioClient:
                 offset += 1
                 temp_res = self.folio_get(
                     path, key, query_params=self._construct_query_parameters(
-                        query=query, limit=limit, offset=offset * limit
+                        query=query, limit=limit, offset=offset * limit, **kwargs
                     )
                 )
                 yield from temp_res
             offset += 1
             yield from self.folio_get(path, key, query_params=self._construct_query_parameters(
-                query=query, limit=limit, offset=offset * limit
+                query=query, limit=limit, offset=offset * limit, **kwargs
             ))
 
     def _construct_query_parameters(self, **kwargs) -> Dict[str, Any]:
@@ -202,7 +204,7 @@ class FolioClient:
         if query := kwargs.get("query"):
             if query.startswith(("?", "query=")):  # Handle previous query specification syntax
                 params["query"] = query.split("=", maxsplit=1)[1]
-            elif kwargs.get("query"):
+            else:
                 params["query"] = query
         return params
 
