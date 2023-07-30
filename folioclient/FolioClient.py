@@ -201,7 +201,7 @@ class FolioClient:
     def _construct_query_parameters(self, **kwargs) -> Dict[str, Any]:
         """Private method to construct query parameters for folio_get or httpx client calls"""
         params = kwargs
-        if query := kwargs.get("query"):
+        if query := kwargs.pop("query"):
             if query.startswith(("?", "query=")):  # Handle previous query specification syntax
                 params["query"] = query.split("=", maxsplit=1)[1]
             else:
