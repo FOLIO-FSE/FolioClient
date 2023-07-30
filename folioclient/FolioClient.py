@@ -181,7 +181,7 @@ class FolioClient:
             offset = 0
             query = query or " ".join((self.cql_all, "sortBy id"))
             query_params: Dict[str, Any] = self._construct_query_parameters(
-                query=query, limit=limit, offset=offset * limit, **kwargs
+                limit=limit, offset=offset * limit, query=query, **kwargs
             )
             temp_res = self.folio_get(path, key, query_params=query_params)
             yield from temp_res
@@ -189,13 +189,13 @@ class FolioClient:
                 offset += 1
                 temp_res = self.folio_get(
                     path, key, query_params=self._construct_query_parameters(
-                        query=query, limit=limit, offset=offset * limit, **kwargs
+                        limit=limit, offset=offset * limit, query=query, **kwargs
                     )
                 )
                 yield from temp_res
             offset += 1
             yield from self.folio_get(path, key, query_params=self._construct_query_parameters(
-                query=query, limit=limit, offset=offset * limit, **kwargs
+                limit=limit, offset=offset * limit, query=query, **kwargs
             ))
 
     def _construct_query_parameters(self, **kwargs) -> Dict[str, Any]:
