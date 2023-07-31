@@ -218,8 +218,8 @@ class FolioClient:
         * path: FOLIO API endpoint path
         * key: Key in JSON response from FOLIO that includes the array of results for query APIs
         * query: For backwards-compatibility
-        * query_params: If applying a `sortBy` statement to your query, the query should be 
-                        specified last
+        * query_params: Additional query parameters for the specified path. May also be used for
+                        `query`
         """
         url = self.okapi_url + path
         if query and query_params:
@@ -367,6 +367,7 @@ class FolioClient:
         name = next(f for f in [*resp] if f != "totalRecords")
         rand = random.randint(0, total)  # noqa # NOSONAR not used in secure context
         query_params = {}
+        query_params["query"] = query or self.cql_all
         query_params["limit"] = count
         query_params["offset"] = rand
         print(f"{total} {path} found, picking {count} from {rand} onwards")
