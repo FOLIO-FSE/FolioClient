@@ -181,7 +181,7 @@ class FolioClient:
             offset = 0
             query = query or " ".join((self.cql_all, "sortBy id"))
             query_params: Dict[str, Any] = self._construct_query_parameters(
-                limit=limit, offset=offset * limit, query=query, **kwargs
+                query=query, limit=limit, offset=offset * limit, **kwargs
             )
             temp_res = self.folio_get(path, key, query_params=query_params)
             yield from temp_res
@@ -189,23 +189,23 @@ class FolioClient:
                 offset += 1
                 temp_res = self.folio_get(
                     path, key, query_params=self._construct_query_parameters(
-                        limit=limit, offset=offset * limit, query=query, **kwargs
+                        query=query, limit=limit, offset=offset * limit, **kwargs
                     )
                 )
                 yield from temp_res
             offset += 1
             yield from self.folio_get(path, key, query_params=self._construct_query_parameters(
-                limit=limit, offset=offset * limit, query=query, **kwargs
+                query=query, limit=limit, offset=offset * limit, **kwargs
             ))
 
     def _construct_query_parameters(self, **kwargs) -> Dict[str, Any]:
         """Private method to construct query parameters for folio_get or httpx client calls"""
-        query = kwargs.pop("query")
         params = kwargs
-        if query.startswith(("?", "query=")):  # Handle previous query specification syntax
-            params["query"] = query.split("=", maxsplit=1)[1]
-        else:
-            params["query"] = query
+        if query := kwargs.get("query"):
+            if query.startswith(("?", "query=")):  # Handle previous query specification syntax
+                params["query"] = query.split("=", maxsplit=1)[1]
+            else:
+                params["query"] = query
         return params
 
     def get_all(self, path, key=None, query=""):
