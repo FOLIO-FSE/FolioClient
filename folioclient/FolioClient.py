@@ -5,7 +5,9 @@ import os
 import random
 import re
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any
+from typing import Dict
+from urllib.parse import urljoin
 
 import httpx
 import yaml
@@ -221,7 +223,7 @@ class FolioClient:
         * query_params: Additional query parameters for the specified path. May also be used for
                         `query`
         """
-        url = self.okapi_url + path
+        url = f"{self.okapi_url}{path}"
         if query and query_params:
             query_params = self._construct_query_parameters(query=query, **query_params)
         elif query:
@@ -230,7 +232,12 @@ class FolioClient:
             req = self.httpx_client.get(url, params=query_params)
             req.raise_for_status()
         else:
-            req = httpx.get(url, params=query_params, headers=self.okapi_headers, timeout=None, verify=self.ssl_verify)
+            req = httpx.get(
+                url, params=query_params,
+                headers=self.okapi_headers,
+                timeout=None,
+                verify=self.ssl_verify
+            )
             req.raise_for_status()
         return req.json()[key] if key else req.json()
 
@@ -253,7 +260,9 @@ class FolioClient:
         return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/item.json")
 
     @staticmethod
-    def get_latest_from_github(owner, repo, filepath: str, personal_access_token="", ssl_verify=True):  # noqa: S107
+    def get_latest_from_github(
+        owner, repo, filepath: str, personal_access_token="", ssl_verify=True  
+    ):  # noqa: S107
         github_headers = {
             "content-type": "application/json",
             "User-Agent": "Folio Client (https://github.com/FOLIO-FSE/FolioClient)",
@@ -278,9 +287,11 @@ class FolioClient:
         elif filepath.endswith("yaml"):
             return yaml.safe_load(req.text)
         else:
-            raise ValueError("Unknown file ending in %s", filepath)
+            raise ValueError(f"Unknown file ending in {filepath}")
 
-    def get_from_github(self, owner, repo, filepath: str, personal_access_token="", ssl_verify=True):  # noqa: S107
+    def get_from_github(
+            self, owner, repo, filepath: str, personal_access_token="", ssl_verify=True
+    ):  # noqa: S107
         version = self.get_module_version(repo)
         github_headers = {
             "content-type": "application/json",
@@ -293,7 +304,13 @@ class FolioClient:
             github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         if not version:
             f_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-            req = httpx.get(f_path, headers=github_headers, timeout=None, follow_redirects=True, verify=ssl_verify)
+            req = httpx.get(
+                f_path,
+                headers=github_headers,
+                timeout=None,
+                follow_redirects=True,
+                verify=ssl_verify
+            )
             req.raise_for_status()
             latest = json.loads(req.text)
             # print(json.dumps(latest, indent=4))
@@ -302,7 +319,9 @@ class FolioClient:
         else:
             f_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{version}/{filepath}"
         # print(latest_path)
-        req = httpx.get(f_path, headers=github_headers, timeout=None, follow_redirects=True, verify=ssl_verify)
+        req = httpx.get(
+            f_path, headers=github_headers, timeout=None, follow_redirects=True, verify=ssl_verify
+        )
         req.raise_for_status()
         if filepath.endswith("json"):
             return json.loads(req.text)
@@ -385,13 +404,13 @@ class FolioClient:
             "patron_type_id": patron_group_id,
             "location_id": location_id,
         }
-        path = f"{self.okapi_url}/circulation/rules/loan-policy"
-        response = httpx.get(path, params=payload, headers=self.okapi_headers, timeout=None, verify=self.ssl_verify)
-        if response.status_code != 200:
-            print(response.status_code)
-            print(response.text)
-            raise Exception("Request getting Loan Policy Id went wrong!")
-        lp_id = json.loads(response.text)["loanPolicyId"]
+        path = "/circulation/rules/loan-policy"
+        try:
+            response = self.folio_get(path, query_params=payload)
+        except httpx.HTTPError as response_error:
+            response_error.args += ("Request getting Loan Policy ID went wrong!",)
+            raise
+        lp_id = response["loanPolicyId"]
         self.loan_policies[lp_hash] = lp_id
         return lp_id
 
@@ -411,6 +430,7 @@ class FolioClient:
 
 
 def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id):
+    """Generate a hash of the circulation rule parameters that key a loan policy"""
     return str(
         hashlib.sha224(
             ("".join([item_type_id, loan_type_id, patron_type_id, shelving_location_id])).encode(
