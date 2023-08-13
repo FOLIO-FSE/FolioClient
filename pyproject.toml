@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "folioclient"
-version = "0.50.0"
-authors = ["Theodor Tolstoy <github.teddes@tolstoy.se>"]
+version = "0.50.1"
+authors = ["Theodor Tolstoy <github.teddes@tolstoy.se>", "Brooks Travis <brooks.travis@gmail.com>"]
 description = "An API wrapper over the FOLIO LSP API Suite OKAPI."
 repository = "https://github.com/FOLIO-FSE/folioclient"
 keywords = ["FOLIO", "ILS", "LSP", "Library Systems", "MARC21", "Library data"]
