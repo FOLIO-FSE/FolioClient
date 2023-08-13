@@ -152,6 +152,15 @@ class FolioClient:
     def modes_of_issuance(self):
         return list(self.folio_get_all("/modes-of-issuance", "issuanceModes", self.cql_all, 1000))
 
+    @cached_property
+    def authority_source_files(self):
+        """Cached property for all configured authority source files"""
+        return list(
+            self.folio_get_all(
+                "/authority-source-files", "authoritySourceFiles", self.cql_all, 1000
+            )
+        )
+
     def login(self):
         """Logs into FOLIO in order to get the okapi token"""
         payload = {"username": self.username, "password": self.password}
