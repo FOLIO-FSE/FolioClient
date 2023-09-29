@@ -5,10 +5,12 @@ import os
 import random
 import re
 from datetime import datetime
+from datetime import timedelta
+from datetime import timezone as tz
 from typing import Any
 from typing import Dict
 from urllib.parse import urljoin
-
+from dateutil.parser import parse as date_parse
 import httpx
 import yaml
 from openapi_schema_to_json_schema import to_json_schema
@@ -28,13 +30,18 @@ class FolioClient:
         self.username = username
         self.password = password
         self.ssl_verify = ssl_verify
-        self.login()
-        self.okapi_headers = {
-            "x-okapi-token": self.okapi_token,
+        self.httpx_client = None
+        self.refresh_token = None
+        self.cookies = None
+        self.okapi_token_expires = None
+        self.okapi_token_duration = None
+        self.refresh_token_expires = None
+        self.refresh_token_duration = None
+        self.base_headers = {
             "x-okapi-tenant": self.tenant_id,
             "content-type": "application/json",
         }
-        self.httpx_client = None
+        self.login()
 
     def __repr__(self) -> str:
         return f"FolioClient for tenant {self.tenant_id} at {self.okapi_url} as {self.username}"
@@ -162,18 +169,69 @@ class FolioClient:
             )
         )
 
+    @property
+    def okapi_headers(self):
+        """Property that returns okapi headers with the current valid Okapi token"""
+        headers = {
+            "x-okapi-token": self.okapi_token,
+        }
+        headers.update(self.base_headers)
+        return headers
+
+    @property
+    def okapi_token(self):
+        """Property that attempts to return a valid Okapi token, refreshing if needed"""
+        if datetime.now(tz.utc) > (self.okapi_token_expires - timedelta(seconds=self.okapi_token_duration.total_seconds() * .2)):
+            self.refresh()
+        return self._okapi_token
+
+    @okapi_token.setter
+    def okapi_token(self, value):
+        self._okapi_token = value
+
+    @okapi_token.deleter
+    def okapi_token(self):
+        del self._okapi_token
+
+    def refresh(self):
+        """Refreshes okapi_token using the refresh token, when possible"""
+        logging.info("Refreshing okapi token...")
+        url = f"{self.okapi_url}/authn/refresh"
+        req = httpx.post(url, headers=self.base_headers, cookies=self.cookies)
+        if req.status_code == 201:
+            response_body = req.json()
+            self.okapi_token = req.cookies.get("folioAccessToken")
+            self.refresh_token = req.cookies.get("folioRefreshToken")
+            self.cookies = req.cookies
+            self.okapi_token_expires = date_parse(response_body.get("accessTokenExpiration"))
+            self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
+            self.refresh_token_expires = date_parse(response_body.get("refreshTokenExpiration"))
+            self.refresh_token_duration = self.refresh_token_expires - datetime.now(tz.utc)
+        else:
+            self.login()
+
     def login(self):
         """Logs into FOLIO in order to get the okapi token"""
         payload = {"username": self.username, "password": self.password}
-        headers = {
-            "x-okapi-tenant": self.tenant_id,
-            "content-type": "application/json",
-        }
-        url = f"{self.okapi_url}/authn/login"
-        req = httpx.post(url, json=payload, headers=headers, timeout=None, verify=self.ssl_verify)
+        # Transitional implementation to support Poppy and pre-Poppy authentication
+        url = f"{self.okapi_url}/authn/login-with-expiry"
+        try:
+            # Poppy and later
+            req = httpx.post(url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify)
+            req.raise_for_status()
+        except httpx.HTTPError:
+            # Pre-Poppy
+            url = f"{self.okapi_url}/authn/login"
+            req = httpx.post(url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify)
         if req.status_code == 201:
-            self.okapi_token = req.headers.get("x-okapi-token")
-            self.refresh_token = req.headers.get("refreshtoken")
+            response_body = req.json()
+            self.okapi_token = req.headers.get("x-okapi-token") or req.cookies.get("folioAccessToken")
+            self.refresh_token = req.headers.get("refreshtoken") or req.cookies.get("folioRefreshToken")
+            self.cookies = req.cookies
+            self.okapi_token_expires = date_parse(response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z"))
+            self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
+            self.refresh_token_expires = date_parse(response_body.get("refreshTokenExpiration", "2999-12-31T23:59:59Z"))
+            self.refresh_token_duration = self.refresh_token_expires - datetime.now(tz.utc)
         elif req.status_code == 422 or req.status_code not in [500, 413]:
             raise ValueError(f"HTTP {req.status_code}\t{req.text}")
         else:
