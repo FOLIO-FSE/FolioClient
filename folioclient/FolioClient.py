@@ -11,9 +11,10 @@ from urllib.parse import urljoin
 
 import httpx
 import yaml
+from openapi_schema_to_json_schema import to_json_schema
+from openapi_schema_to_json_schema import patternPropertiesHandler
 
 from folioclient.cached_property import cached_property
-
 
 class FolioClient:
     """handles communication and getting values from FOLIO"""
@@ -294,7 +295,8 @@ class FolioClient:
         if filepath.endswith("json"):
             return json.loads(req.text)
         elif filepath.endswith("yaml"):
-            return yaml.safe_load(req.text)
+            yaml_rep = yaml.safe_load(req.text)
+            return to_json_schema(yaml_rep)
         else:
             raise ValueError(f"Unknown file ending in {filepath}")
 
@@ -335,7 +337,8 @@ class FolioClient:
         if filepath.endswith("json"):
             return json.loads(req.text)
         elif filepath.endswith("yaml"):
-            return yaml.safe_load(req.text)
+            yaml_rep = yaml.safe_load(req.text)
+            return to_json_schema(yaml_rep)
         else:
             raise ValueError("Unknown file ending in %s", filepath)
 
@@ -348,7 +351,8 @@ class FolioClient:
             ),
             "",
         ):
-            return res
+            print(module_name)
+            return res if "snapshot" not in res.lower() else None
         else:
             raise ValueError(f"Module named {module_name} was not found in the tenant")
 
