@@ -35,8 +35,9 @@ class FolioClient:
         self.cookies = None
         self.okapi_token_expires = None
         self.okapi_token_duration = None
-        self.refresh_token_expires = None
-        self.refresh_token_duration = None
+        self.okapi_token_time_remaining_threshold = float(
+            os.environ.get("FOLIOCLIENT_REFRESH_API_TOKEN_TIME_REMAINING", ".2")
+        )
         self.base_headers = {
             "x-okapi-tenant": self.tenant_id,
             "content-type": "application/json",
@@ -181,7 +182,7 @@ class FolioClient:
     @property
     def okapi_token(self):
         """Property that attempts to return a valid Okapi token, refreshing if needed"""
-        if datetime.now(tz.utc) > (self.okapi_token_expires - timedelta(seconds=self.okapi_token_duration.total_seconds() * .2)):
+        if datetime.now(tz.utc) > (self.okapi_token_expires - timedelta(seconds=self.okapi_token_duration.total_seconds() * self.okapi_token_time_remaining_threshold)):
             self.refresh()
         return self._okapi_token
 
@@ -205,10 +206,11 @@ class FolioClient:
             self.cookies = req.cookies
             self.okapi_token_expires = date_parse(response_body.get("accessTokenExpiration"))
             self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
-            self.refresh_token_expires = date_parse(response_body.get("refreshTokenExpiration"))
-            self.refresh_token_duration = self.refresh_token_expires - datetime.now(tz.utc)
+            logging.info("Okapi token refreshed.")
         else:
+            logging.info("Refresh failed, attempting login again...")
             self.login()
+            logging.info("Login successful.")
 
     def login(self):
         """Logs into FOLIO in order to get the okapi token"""
@@ -221,8 +223,12 @@ class FolioClient:
             req.raise_for_status()
         except httpx.HTTPError:
             # Pre-Poppy
-            url = f"{self.okapi_url}/authn/login"
-            req = httpx.post(url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify)
+            if req.status_code == 404:
+                url = f"{self.okapi_url}/authn/login"
+                req = httpx.post(url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify)
+                req.raise_for_status()
+            else:
+                raise
         if req.status_code == 201:
             response_body = req.json()
             self.okapi_token = req.headers.get("x-okapi-token") or req.cookies.get("folioAccessToken")
@@ -230,12 +236,6 @@ class FolioClient:
             self.cookies = req.cookies
             self.okapi_token_expires = date_parse(response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z"))
             self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
-            self.refresh_token_expires = date_parse(response_body.get("refreshTokenExpiration", "2999-12-31T23:59:59Z"))
-            self.refresh_token_duration = self.refresh_token_expires - datetime.now(tz.utc)
-        elif req.status_code == 422 or req.status_code not in [500, 413]:
-            raise ValueError(f"HTTP {req.status_code}\t{req.text}")
-        else:
-            raise ValueError(f"HTTP {req.status_code}\n{req.text} ")
 
     def get_single_instance(self, instance_id):
         return self.folio_get_all(f"inventory/instances/{instance_id}")
