@@ -217,9 +217,9 @@ class FolioClient:
         payload = {"username": self.username, "password": self.password}
         # Transitional implementation to support Poppy and pre-Poppy authentication
         url = f"{self.okapi_url}/authn/login-with-expiry"
+        # Poppy and later
+        req = httpx.post(url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify)
         try:
-            # Poppy and later
-            req = httpx.post(url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify)
             req.raise_for_status()
         except httpx.HTTPError:
             # Pre-Poppy
