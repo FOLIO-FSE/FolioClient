@@ -229,13 +229,12 @@ class FolioClient:
                 req.raise_for_status()
             else:
                 raise
-        if req.status_code == 201:
-            response_body = req.json()
-            self.okapi_token = req.headers.get("x-okapi-token") or req.cookies.get("folioAccessToken")
-            self.refresh_token = req.headers.get("refreshtoken") or req.cookies.get("folioRefreshToken")
-            self.cookies = req.cookies
-            self.okapi_token_expires = date_parse(response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z"))
-            self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
+        response_body = req.json()
+        self.okapi_token = req.headers.get("x-okapi-token") or req.cookies.get("folioAccessToken")
+        self.refresh_token = req.headers.get("refreshtoken") or req.cookies.get("folioRefreshToken")
+        self.cookies = req.cookies
+        self.okapi_token_expires = date_parse(response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z"))
+        self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
 
     def get_single_instance(self, instance_id):
         return self.folio_get_all(f"inventory/instances/{instance_id}")
