@@ -42,6 +42,7 @@ class FolioClient:
             "x-okapi-tenant": self.tenant_id,
             "content-type": "application/json",
         }
+        self._okapi_headers = {}
         self.login()
 
     def __repr__(self) -> str:
@@ -172,18 +173,35 @@ class FolioClient:
 
     @property
     def okapi_headers(self):
-        """Property that returns okapi headers with the current valid Okapi token"""
+        """
+        Property that returns okapi headers with the current valid Okapi token. All headers except
+        x-okapi-token can be modified by key-value assignment. If a new x-okapi-token value is set
+        via this method, it will be overwritten with the current, valid okapi token value returned
+        by self.okapi_token
+        """
         headers = {
             "x-okapi-token": self.okapi_token,
         }
-        headers.update(self.base_headers)
-        return headers
+        if self._okapi_headers:
+            self._okapi_headers.update(headers)
+        else:
+            self._okapi_headers.update(self.base_headers)
+            self._okapi_headers.update(headers)
+        return self._okapi_headers
+
+    @okapi_headers.deleter
+    def okapi_headers(self):
+        """
+        Deleter for okapi_headers that clears the private _okapi_headers dictionary, which will
+        revert okapi_headers to using base_headers
+        """
+        self._okapi_headers.clear()
 
     @property
     def okapi_token(self):
         """Property that attempts to return a valid Okapi token, refreshing if needed"""
         if datetime.now(tz.utc) > (self.okapi_token_expires - timedelta(seconds=self.okapi_token_duration.total_seconds() * self.okapi_token_time_remaining_threshold)):
-            self.refresh()
+            self.login()
         return self._okapi_token
 
     @okapi_token.setter
@@ -193,24 +211,6 @@ class FolioClient:
     @okapi_token.deleter
     def okapi_token(self):
         del self._okapi_token
-
-    def refresh(self):
-        """Refreshes okapi_token using the refresh token, when possible"""
-        logging.info("Refreshing okapi token...")
-        url = f"{self.okapi_url}/authn/refresh"
-        req = httpx.post(url, headers=self.base_headers, cookies=self.cookies)
-        if req.status_code == 201:
-            response_body = req.json()
-            self.okapi_token = req.cookies.get("folioAccessToken")
-            self.refresh_token = req.cookies.get("folioRefreshToken")
-            self.cookies = req.cookies
-            self.okapi_token_expires = date_parse(response_body.get("accessTokenExpiration"))
-            self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
-            logging.info("Okapi token refreshed.")
-        else:
-            logging.info("Refresh failed, attempting login again...")
-            self.login()
-            logging.info("Login successful.")
 
     def login(self):
         """Logs into FOLIO in order to get the okapi token"""
@@ -231,8 +231,6 @@ class FolioClient:
                 raise
         response_body = req.json()
         self.okapi_token = req.headers.get("x-okapi-token") or req.cookies.get("folioAccessToken")
-        self.refresh_token = req.headers.get("refreshtoken") or req.cookies.get("folioRefreshToken")
-        self.cookies = req.cookies
         self.okapi_token_expires = date_parse(response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z"))
         self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
 
