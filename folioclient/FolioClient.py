@@ -206,14 +206,6 @@ class FolioClient:
             self.login()
         return self._okapi_token
 
-    @okapi_token.setter
-    def okapi_token(self, value):
-        self._okapi_token = value
-
-    @okapi_token.deleter
-    def okapi_token(self):
-        del self._okapi_token
-
     def login(self):
         """Logs into FOLIO in order to get the okapi token"""
         payload = {"username": self.username, "password": self.password}
@@ -232,7 +224,7 @@ class FolioClient:
             else:
                 raise
         response_body = req.json()
-        self.okapi_token = req.headers.get("x-okapi-token") or req.cookies.get("folioAccessToken")
+        self._okapi_token = req.headers.get("x-okapi-token") or req.cookies.get("folioAccessToken")
         self.okapi_token_expires = date_parse(response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z"))
         self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
 
