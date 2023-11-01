@@ -177,7 +177,9 @@ class FolioClient:
         Property that returns okapi headers with the current valid Okapi token. All headers except
         x-okapi-token can be modified by key-value assignment. If a new x-okapi-token value is set
         via this method, it will be overwritten with the current, valid okapi token value returned
-        by self.okapi_token
+        by self.okapi_token. To reset all header values to their initial state:
+
+        >>>> del folio_client.okapi_headers
         """
         headers = {
             "x-okapi-token": self.okapi_token,
