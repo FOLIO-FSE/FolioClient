@@ -1,18 +1,34 @@
 # Changelog
 
-## v0.50.0 (31/12/1969)
+## v0.60.0 (07/11/2023)
 ## What's Changed
-* Add a representation to the class by @JensHeinrich in https://github.com/FOLIO-FSE/FolioClient/pull/9
-* Removing poetry.lock. Closes Remove poetry.lock from repo #17 by @bltravis in https://github.com/FOLIO-FSE/FolioClient/pull/18
-* Swap requests with httpx by @bltravis in https://github.com/FOLIO-FSE/FolioClient/pull/19
+* 25 fix GitHub testing configuration by @bltravis in https://github.com/FOLIO-FSE/FolioClient/pull/26
+* Fixes Better Support fetching YAML Schemas for OpenAPI modules #30 by @bltravis in https://github.com/FOLIO-FSE/FolioClient/pull/31
+* Updated FolioClient to use dynamic properties for api token values by @bltravis in https://github.com/FOLIO-FSE/FolioClient/pull/28
+* Fixes #32 by @bltravis in https://github.com/FOLIO-FSE/FolioClient/pull/33
 
-## New Contributors
-* @JensHeinrich made their first contribution in https://github.com/FOLIO-FSE/FolioClient/pull/9
 
-**Full Changelog**: https://github.com/FOLIO-FSE/FolioClient/compare/v_043...v_050
+**Full Changelog**: https://github.com/FOLIO-FSE/FolioClient/compare/v_0501...v_0600
 ---
 
-## v.0.4.3 (16/02/2023)
+## v_0501 (13/08/2023)
+## What's Changed
+* Add optional parameter to pass ssl verification parameters to httpx. Fixes #20 by @bltravis in https://github.com/FOLIO-FSE/FolioClient/pull/21
+* Refactor how query parameters are handled for FolioClient.folio_get_all and FolioClient.folio_get by @bltravis in https://github.com/FOLIO-FSE/FolioClient/pull/22
+* Bumped version to 0.50.1 and added author. by @bltravis in https://github.com/FOLIO-FSE/FolioClient/pull/24
+
+
+**Full Changelog**: https://github.com/FOLIO-FSE/FolioClient/compare/v_050...v_0501
+---
+
+## v_050 (16/05/2023)
+- [**closed**] Remove poetry.lock from repo [#17](https://github.com/FOLIO-FSE/FolioClient/issues/17)
+- [**closed**] Swap out requests for an async-compatible library [#16](https://github.com/FOLIO-FSE/FolioClient/issues/16)
+
+---
+
+## v_043 (16/02/2023)
+*No changelog for this release.*
 
 ---
 
@@ -117,11 +133,3 @@ This change might brake code, since it move from returning lists to yielding .
 ---
 
 ## Sixteenth! (21/02/2020)
-
----
-
-## Fifteenth! (21/02/2020)
-
----
-
-## Fourteenth! (21/02/2020)
