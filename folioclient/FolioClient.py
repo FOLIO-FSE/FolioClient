@@ -18,6 +18,7 @@ from openapi_schema_to_json_schema import patternPropertiesHandler
 
 from folioclient.cached_property import cached_property
 
+
 class FolioClient:
     """handles communication and getting values from FOLIO"""
 
@@ -202,7 +203,13 @@ class FolioClient:
     @property
     def okapi_token(self):
         """Property that attempts to return a valid Okapi token, refreshing if needed"""
-        if datetime.now(tz.utc) > (self.okapi_token_expires - timedelta(seconds=self.okapi_token_duration.total_seconds() * self.okapi_token_time_remaining_threshold)):
+        if datetime.now(tz.utc) > (
+            self.okapi_token_expires
+            - timedelta(
+                seconds=self.okapi_token_duration.total_seconds()
+                * self.okapi_token_time_remaining_threshold
+            )
+        ):
             self.login()
         return self._okapi_token
 
@@ -212,20 +219,30 @@ class FolioClient:
         # Transitional implementation to support Poppy and pre-Poppy authentication
         url = f"{self.okapi_url}/authn/login-with-expiry"
         # Poppy and later
-        req = httpx.post(url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify)
+        req = httpx.post(
+            url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify
+        )
         try:
             req.raise_for_status()
         except httpx.HTTPError:
             # Pre-Poppy
             if req.status_code == 404:
                 url = f"{self.okapi_url}/authn/login"
-                req = httpx.post(url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify)
+                req = httpx.post(
+                    url,
+                    json=payload,
+                    headers=self.base_headers,
+                    timeout=None,
+                    verify=self.ssl_verify,
+                )
                 req.raise_for_status()
             else:
                 raise
         response_body = req.json()
         self._okapi_token = req.headers.get("x-okapi-token") or req.cookies.get("folioAccessToken")
-        self.okapi_token_expires = date_parse(response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z"))
+        self.okapi_token_expires = date_parse(
+            response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z")
+        )
         self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
 
     def get_single_instance(self, instance_id):
@@ -237,7 +254,7 @@ class FolioClient:
         an iterable object yielding a single record at a time until all records have been returned.
         - kwargs are passed as additional url parameters to `path`
         """
-        with httpx.Client(headers=self.okapi_headers, timeout=None, verify=self.ssl_verify) as httpx_client:
+        with httpx.Client(timeout=None, verify=self.ssl_verify) as httpx_client:
             self.httpx_client = httpx_client
             offset = 0
             query = query or " ".join((self.cql_all, "sortBy id"))
@@ -249,15 +266,21 @@ class FolioClient:
             while len(temp_res) == limit:
                 offset += 1
                 temp_res = self.folio_get(
-                    path, key, query_params=self._construct_query_parameters(
+                    path,
+                    key,
+                    query_params=self._construct_query_parameters(
                         query=query, limit=limit, offset=offset * limit, **kwargs
-                    )
+                    ),
                 )
                 yield from temp_res
             offset += 1
-            yield from self.folio_get(path, key, query_params=self._construct_query_parameters(
-                query=query, limit=limit, offset=offset * limit, **kwargs
-            ))
+            yield from self.folio_get(
+                path,
+                key,
+                query_params=self._construct_query_parameters(
+                    query=query, limit=limit, offset=offset * limit, **kwargs
+                ),
+            )
 
     def _construct_query_parameters(self, **kwargs) -> Dict[str, Any]:
         """Private method to construct query parameters for folio_get or httpx client calls"""
@@ -288,14 +311,15 @@ class FolioClient:
         elif query:
             query_params = self._construct_query_parameters(query=query)
         if self.httpx_client and not self.httpx_client.is_closed:
-            req = self.httpx_client.get(url, params=query_params)
+            req = self.httpx_client.get(url, params=query_params, headers=self.okapi_headers)
             req.raise_for_status()
         else:
             req = httpx.get(
-                url, params=query_params,
+                url,
+                params=query_params,
                 headers=self.okapi_headers,
                 timeout=None,
-                verify=self.ssl_verify
+                verify=self.ssl_verify,
             )
             req.raise_for_status()
         return req.json()[key] if key else req.json()
@@ -320,7 +344,7 @@ class FolioClient:
 
     @staticmethod
     def get_latest_from_github(
-        owner, repo, filepath: str, personal_access_token="", ssl_verify=True  
+        owner, repo, filepath: str, personal_access_token="", ssl_verify=True
     ):  # noqa: S107
         github_headers = {
             "content-type": "application/json",
@@ -332,14 +356,26 @@ class FolioClient:
             logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
             github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         latest_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-        req = httpx.get(latest_path, headers=github_headers, timeout=None, follow_redirects=True, verify=ssl_verify)
+        req = httpx.get(
+            latest_path,
+            headers=github_headers,
+            timeout=None,
+            follow_redirects=True,
+            verify=ssl_verify,
+        )
         req.raise_for_status()
         latest = json.loads(req.text)
         # print(json.dumps(latest, indent=4))
         latest_tag = latest["tag_name"]
         latest_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
         # print(latest_path)
-        req = httpx.get(latest_path, headers=github_headers, timeout=None, follow_redirects=True, verify=ssl_verify)
+        req = httpx.get(
+            latest_path,
+            headers=github_headers,
+            timeout=None,
+            follow_redirects=True,
+            verify=ssl_verify,
+        )
         req.raise_for_status()
         if filepath.endswith("json"):
             return json.loads(req.text)
@@ -350,7 +386,7 @@ class FolioClient:
             raise ValueError(f"Unknown file ending in {filepath}")
 
     def get_from_github(
-            self, owner, repo, filepath: str, personal_access_token="", ssl_verify=True
+        self, owner, repo, filepath: str, personal_access_token="", ssl_verify=True
     ):  # noqa: S107
         version = self.get_module_version(repo)
         github_headers = {
@@ -369,7 +405,7 @@ class FolioClient:
                 headers=github_headers,
                 timeout=None,
                 follow_redirects=True,
-                verify=ssl_verify
+                verify=ssl_verify,
             )
             req.raise_for_status()
             latest = json.loads(req.text)
