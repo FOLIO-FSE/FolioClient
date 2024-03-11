@@ -51,13 +51,22 @@ class FolioClient:
 
     @cached_property
     def current_user(self):
+        """
+        This method returns the current user id for the user that is logged in, based on username.
+        self.tenant_id is always used as x-okapi-tenant header, and is reset to any existing value
+        after the call.
+        """
         logging.info("fetching current user..")
+        current_tenant_id = self.okapi_headers["x-okapi-tenant"]
+        self.okapi_headers["x-okapi-tenant"] = self.tenant_id
         try:
             path = f"/bl-users/by-username/{self.username}"
             resp = self.folio_get(path, "user")
+            self.okapi_headers["x-okapi-tenant"] = current_tenant_id
             return resp["id"]
         except Exception as exception:
             logging.error(f"Unable to fetch user id for user {self.username}", exc_info=exception)
+            self.okapi_headers["x-okapi-tenant"] = current_tenant_id
             return ""
 
     @cached_property
