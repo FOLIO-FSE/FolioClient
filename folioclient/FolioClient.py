@@ -75,7 +75,14 @@ class FolioClient:
 
     @cached_property
     def module_versions(self):
-        resp = self.folio_get(f"/_/proxy/tenants/{self.tenant_id}/modules")
+        try:
+            resp = self.folio_get(f"/_/proxy/tenants/{self.tenant_id}/modules")
+        except httpx.HTTPError:
+            entitlements = self.folio_get(f"/entitlements/{self.tenant_id}/applications")
+            resp = []
+            for app in entitlements["applicationDescriptors"]:
+                for md in app["modules"]:
+                    resp.append(md)
         return [a["id"] for a in resp]
 
     @cached_property
