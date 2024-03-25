@@ -350,9 +350,19 @@ class FolioClient:
 
     def get_holdings_schema(self):
         """Fetches the JSON Schema for holdings"""
-        return self.get_from_github(
-            "folio-org", "mod-inventory-storage", "/ramls/holdingsrecord.json"
-        )
+        try:
+            return self.get_from_github(
+                "folio-org", "mod-inventory-storage", "/ramls/holdingsrecord.json"
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return self.get_from_github(
+                    "folio-org",
+                    "mod-inventory-storage",
+                    "/ramls/holdings-storage/holdingsRecord.json",
+                )
+            else:
+                raise
 
     def get_item_schema(self):
         """Fetches the JSON Schema for holdings"""
