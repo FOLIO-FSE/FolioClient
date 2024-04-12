@@ -233,7 +233,7 @@ class FolioClient:
         """Logs into FOLIO in order to get the okapi token"""
         payload = {"username": self.username, "password": self.password}
         # Transitional implementation to support Poppy and pre-Poppy authentication
-        url = f"{self.okapi_url}/authn/login-with-expiry"
+        url = urljoin(self.okapi_url, "/authn/login-with-expiry").rstrip("/")
         # Poppy and later
         req = httpx.post(
             url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify
@@ -243,7 +243,7 @@ class FolioClient:
         except httpx.HTTPError:
             # Pre-Poppy
             if req.status_code == 404:
-                url = f"{self.okapi_url}/authn/login"
+                url = urljoin(self.okapi_url, "/authn/login").rstrip("/")
                 req = httpx.post(
                     url,
                     json=payload,
@@ -312,7 +312,7 @@ class FolioClient:
         """Alias for `folio_get_all`"""
         return self.folio_get_all(path, key, query)
 
-    def folio_get(self, path, key=None, query="", query_params=None):
+    def folio_get(self, path, key=None, query="", query_params: dict = None):
         """
         Fetches data from FOLIO and turns it into a json object
         * path: FOLIO API endpoint path
@@ -321,7 +321,7 @@ class FolioClient:
         * query_params: Additional query parameters for the specified path. May also be used for
                         `query`
         """
-        url = f"{self.okapi_url}{path}"
+        url = urljoin(self.okapi_url, path).rstrip("/")
         if query and query_params:
             query_params = self._construct_query_parameters(query=query, **query_params)
         elif query:
@@ -339,6 +339,44 @@ class FolioClient:
             )
             req.raise_for_status()
         return req.json()[key] if key else req.json()
+
+    def folio_put(self, path, payload, query_params: dict = None):
+        """Convenience method to update data in FOLIO"""
+        url = urljoin(self.okapi_url, path).rstrip("/")
+        with self.get_folio_http_client() as httpx_client:
+            req = httpx_client.put(
+                url,
+                headers=self.okapi_headers,
+                json=payload,
+                verify=self.ssl_verify,
+                params=query_params,
+            )
+            req.raise_for_status()
+            try:
+                return req.json()
+            except json.JSONDecodeError:
+                return None
+
+    def folio_post(self, path, payload, query_params: dict = None):
+        """Convenience method to post data to FOLIO"""
+        url = urljoin(self.okapi_url, path).rstrip("/")
+        with self.get_folio_http_client() as httpx_client:
+            req = httpx_client.post(
+                url,
+                headers=self.okapi_headers,
+                json=payload,
+                verify=self.ssl_verify,
+                params=query_params,
+            )
+            req.raise_for_status()
+            try:
+                return req.json()
+            except json.JSONDecodeError:
+                return None
+
+    def get_folio_http_client(self):
+        """Returns a httpx client for use in FOLIO communication"""
+        return httpx.Client(timeout=None, verify=self.ssl_verify)
 
     def folio_get_single_object(self, path):
         """Fetches data from FOLIO and turns it into a json object as is"""
@@ -546,7 +584,7 @@ class FolioClient:
 
     def put_user(self, user):
         """Fetches data from FOLIO and turns it into a json object as is"""
-        url = f"{self.okapi_url}/users/{user['id']}"
+        url = urljoin(self.okapi_url, f"/users/{user['id']}").rstrip("/")
         print(url)
         req = httpx.put(url, headers=self.okapi_headers, json=user, verify=self.ssl_verify)
         print(f"{req.status_code}")
