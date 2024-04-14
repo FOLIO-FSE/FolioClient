@@ -233,7 +233,7 @@ class FolioClient:
         """Logs into FOLIO in order to get the okapi token"""
         payload = {"username": self.username, "password": self.password}
         # Transitional implementation to support Poppy and pre-Poppy authentication
-        url = urljoin(self.okapi_url, "/authn/login-with-expiry").rstrip("/")
+        url = urljoin(self.okapi_url, "/authn/login-with-expiry")
         # Poppy and later
         req = httpx.post(
             url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify
@@ -243,7 +243,7 @@ class FolioClient:
         except httpx.HTTPError:
             # Pre-Poppy
             if req.status_code == 404:
-                url = urljoin(self.okapi_url, "/authn/login").rstrip("/")
+                url = urljoin(self.okapi_url, "/authn/login")
                 req = httpx.post(
                     url,
                     json=payload,
@@ -584,7 +584,7 @@ class FolioClient:
 
     def put_user(self, user):
         """Fetches data from FOLIO and turns it into a json object as is"""
-        url = urljoin(self.okapi_url, f"/users/{user['id']}").rstrip("/")
+        url = urljoin(self.okapi_url, f"/users/{user['id']}")
         print(url)
         req = httpx.put(url, headers=self.okapi_headers, json=user, verify=self.ssl_verify)
         print(f"{req.status_code}")
