@@ -17,6 +17,7 @@ from openapi_schema_to_json_schema import to_json_schema
 from openapi_schema_to_json_schema import patternPropertiesHandler
 
 from folioclient.cached_property import cached_property
+import time
 
 
 class FolioClient:
@@ -235,22 +236,70 @@ class FolioClient:
         # Transitional implementation to support Poppy and pre-Poppy authentication
         url = urljoin(self.okapi_url, "/authn/login-with-expiry")
         # Poppy and later
-        req = httpx.post(
-            url, json=payload, headers=self.base_headers, timeout=None, verify=self.ssl_verify
-        )
+        retry_factor = float(os.environ.get("FOLIOCLIENT_AUTH_SERVER_ERROR_RETRY_FACTOR", "3"))
+        max_retries = int(os.environ.get("FOLIOCLIENT_MAX_AUTH_SERVER_ERROR_RETRIES", "0"))
+        retry_delay = int(os.environ.get("FOLIOCLIENT_AUTH_SERVER_ERROR_RETRY_DELAY", "10"))
+
         try:
+            for retry in range(max_retries + 1):
+                try:
+                    req = httpx.post(
+                        url,
+                        json=payload,
+                        headers=self.base_headers,
+                        timeout=None,
+                        verify=self.ssl_verify,
+                    )
+                    req.raise_for_status()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    if req.status_code in [502, 503, 504]:
+                        if retry == max_retries:
+                            logging.exception(
+                                f'Server error requesting new auth token: "{exc.response}"'
+                                "Maximum number of retries reached, giving up."
+                            )
+                            raise
+                        logging.info(
+                            f"FOLIOCLIENT: Server error requesting new auth token:"
+                            f' "{exc.response}". Retrying again in {retry_delay} seconds. '
+                            f"Retry {retry + 1}/{max_retries}"
+                        )
+                        time.sleep(retry_delay)
+                        retry_delay *= retry_factor
             req.raise_for_status()
-        except httpx.HTTPError:
+        except httpx.HTTPStatusError:
             # Pre-Poppy
             if req.status_code == 404:
                 url = urljoin(self.okapi_url, "/authn/login")
-                req = httpx.post(
-                    url,
-                    json=payload,
-                    headers=self.base_headers,
-                    timeout=None,
-                    verify=self.ssl_verify,
-                )
+                for retry in range(max_retries + 1):
+                    try:
+                        req = httpx.post(
+                            url,
+                            json=payload,
+                            headers=self.base_headers,
+                            timeout=None,
+                            verify=self.ssl_verify,
+                        )
+                        req.raise_for_status()
+                        break
+                    except httpx.HTTPStatusError as exc:
+                        if req.status_code in [502, 503, 504]:
+                            if retry == max_retries:
+                                logging.exception(
+                                    f'Server error requesting new auth token: "{exc.response}"'
+                                    "Maximum number of retries reached, giving up."
+                                )
+                                raise
+                            logging.info(
+                                f"FOLIOCLIENT: Server error requesting new auth token:"
+                                f' "{exc.response}". Retrying again in {retry_delay} seconds. '
+                                f"Retry {retry + 1}/{max_retries}"
+                            )
+                            time.sleep(retry_delay)
+                            retry_delay *= retry_factor
+                        else:
+                            raise
                 req.raise_for_status()
             else:
                 raise
