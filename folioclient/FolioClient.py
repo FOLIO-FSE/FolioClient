@@ -17,7 +17,9 @@ from openapi_schema_to_json_schema import to_json_schema
 from openapi_schema_to_json_schema import patternPropertiesHandler
 
 from folioclient.cached_property import cached_property
-import time
+from folioclient.decorators import retry_on_server_error
+
+CONTENT_TYPE_JSON = CONTENT_TYPE_JSON
 
 
 class FolioClient:
@@ -42,7 +44,7 @@ class FolioClient:
         )
         self.base_headers = {
             "x-okapi-tenant": self.tenant_id,
-            "content-type": "application/json",
+            "content-type": CONTENT_TYPE_JSON,
         }
         self._okapi_headers = {}
         self.login()
@@ -76,6 +78,7 @@ class FolioClient:
 
     @cached_property
     def module_versions(self):
+        """Returns a list of module versions for the current tenant."""
         try:
             resp = self.folio_get(f"/_/proxy/tenants/{self.tenant_id}/modules")
         except httpx.HTTPError:
@@ -88,6 +91,9 @@ class FolioClient:
 
     @cached_property
     def statistical_codes(self):
+        """
+        Returns a list of statistical codes.
+        """
         return list(
             self.folio_get_all("/statistical-codes", "statisticalCodes", self.cql_all, 1000)
         )
@@ -198,6 +204,9 @@ class FolioClient:
         by self.okapi_token. To reset all header values to their initial state:
 
         >>>> del folio_client.okapi_headers
+
+        Returns:
+            dict: The okapi headers.
         """
         headers = {
             "x-okapi-token": self.okapi_token,
@@ -219,7 +228,12 @@ class FolioClient:
 
     @property
     def okapi_token(self):
-        """Property that attempts to return a valid Okapi token, refreshing if needed"""
+        """
+        Property that attempts to return a valid Okapi token, refreshing if needed.
+
+        Returns:
+            str: The Okapi token.
+        """
         if datetime.now(tz.utc) > (
             self.okapi_token_expires
             - timedelta(
@@ -230,76 +244,33 @@ class FolioClient:
             self.login()
         return self._okapi_token
 
+    @retry_on_server_error
     def login(self):
-        """Logs into FOLIO in order to get the okapi token"""
+        """Logs into FOLIO in order to get the folio access token."""
         payload = {"username": self.username, "password": self.password}
         # Transitional implementation to support Poppy and pre-Poppy authentication
         url = urljoin(self.okapi_url, "/authn/login-with-expiry")
         # Poppy and later
-        retry_factor = float(os.environ.get("FOLIOCLIENT_AUTH_SERVER_ERROR_RETRY_FACTOR", "3"))
-        max_retries = int(os.environ.get("FOLIOCLIENT_MAX_AUTH_SERVER_ERROR_RETRIES", "0"))
-        retry_delay = int(os.environ.get("FOLIOCLIENT_AUTH_SERVER_ERROR_RETRY_DELAY", "10"))
-
         try:
-            for retry in range(max_retries + 1):
-                try:
-                    req = httpx.post(
-                        url,
-                        json=payload,
-                        headers=self.base_headers,
-                        timeout=None,
-                        verify=self.ssl_verify,
-                    )
-                    req.raise_for_status()
-                    break
-                except httpx.HTTPStatusError as exc:
-                    if req.status_code in [502, 503, 504]:
-                        if retry == max_retries:
-                            logging.exception(
-                                f'Server error requesting new auth token: "{exc.response}"'
-                                "Maximum number of retries reached, giving up."
-                            )
-                            raise
-                        logging.info(
-                            f"FOLIOCLIENT: Server error requesting new auth token:"
-                            f' "{exc.response}". Retrying again in {retry_delay} seconds. '
-                            f"Retry {retry + 1}/{max_retries}"
-                        )
-                        time.sleep(retry_delay)
-                        retry_delay *= retry_factor
+            req = httpx.post(
+                url,
+                json=payload,
+                headers=self.base_headers,
+                timeout=None,
+                verify=self.ssl_verify,
+            )
             req.raise_for_status()
         except httpx.HTTPStatusError:
             # Pre-Poppy
             if req.status_code == 404:
                 url = urljoin(self.okapi_url, "/authn/login")
-                for retry in range(max_retries + 1):
-                    try:
-                        req = httpx.post(
-                            url,
-                            json=payload,
-                            headers=self.base_headers,
-                            timeout=None,
-                            verify=self.ssl_verify,
-                        )
-                        req.raise_for_status()
-                        break
-                    except httpx.HTTPStatusError as exc:
-                        if req.status_code in [502, 503, 504]:
-                            if retry == max_retries:
-                                logging.exception(
-                                    f'Server error requesting new auth token: "{exc.response}"'
-                                    "Maximum number of retries reached, giving up."
-                                )
-                                raise
-                            logging.info(
-                                f"FOLIOCLIENT: Server error requesting new auth token:"
-                                f' "{exc.response}". Retrying again in {retry_delay} seconds. '
-                                f"Retry {retry + 1}/{max_retries}"
-                            )
-                            time.sleep(retry_delay)
-                            retry_delay *= retry_factor
-                        else:
-                            raise
+                req = httpx.post(
+                    url,
+                    json=payload,
+                    headers=self.base_headers,
+                    timeout=None,
+                    verify=self.ssl_verify,
+                )
                 req.raise_for_status()
             else:
                 raise
@@ -315,9 +286,12 @@ class FolioClient:
 
     def folio_get_all(self, path, key=None, query=None, limit=10, **kwargs):
         """
-        Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
+         Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
         an iterable object yielding a single record at a time until all records have been returned.
-        - kwargs are passed as additional url parameters to `path`
+        :param query: The query string to filter the data objects.
+        :param limit: The maximum number of records to fetch in each chunk.
+        :param kwargs: Additional url parameters to pass to `path`.
+        :return: An iterable object yielding a single record at a time.
         """
         with httpx.Client(timeout=None, verify=self.ssl_verify) as httpx_client:
             self.httpx_client = httpx_client
@@ -348,7 +322,11 @@ class FolioClient:
             )
 
     def _construct_query_parameters(self, **kwargs) -> Dict[str, Any]:
-        """Private method to construct query parameters for folio_get or httpx client calls"""
+        """Private method to construct query parameters for folio_get or httpx client calls
+
+        :param kwargs: Additional keyword arguments.
+        :return: A dictionary of query parameters.
+        """
         params = kwargs
         if query := kwargs.get("query"):
             if query.startswith(("?", "query=")):  # Handle previous query specification syntax
@@ -368,7 +346,7 @@ class FolioClient:
         * key: Key in JSON response from FOLIO that includes the array of results for query APIs
         * query: For backwards-compatibility
         * query_params: Additional query parameters for the specified path. May also be used for
-                        `query`
+                `query`
         """
         url = urljoin(self.okapi_url, path).rstrip("/")
         if query and query_params:
@@ -460,7 +438,7 @@ class FolioClient:
         owner, repo, filepath: str, personal_access_token="", ssl_verify=True
     ):  # noqa: S107
         github_headers = {
-            "content-type": "application/json",
+            "content-type": CONTENT_TYPE_JSON,
             "User-Agent": "Folio Client (https://github.com/FOLIO-FSE/FolioClient)",
         }
         if personal_access_token:
@@ -503,7 +481,7 @@ class FolioClient:
     ):  # noqa: S107
         version = self.get_module_version(repo)
         github_headers = {
-            "content-type": "application/json",
+            "content-type": CONTENT_TYPE_JSON,
             "User-Agent": "Folio Client (https://github.com/FOLIO-FSE/FolioClient)",
         }
         if personal_access_token:
