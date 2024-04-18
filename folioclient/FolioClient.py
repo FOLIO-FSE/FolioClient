@@ -19,7 +19,7 @@ from openapi_schema_to_json_schema import patternPropertiesHandler
 from folioclient.cached_property import cached_property
 from folioclient.decorators import retry_on_server_error
 
-CONTENT_TYPE_JSON = CONTENT_TYPE_JSON
+CONTENT_TYPE_JSON = "application/json"
 
 
 class FolioClient:
