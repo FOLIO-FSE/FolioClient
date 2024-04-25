@@ -20,6 +20,10 @@ from folioclient.cached_property import cached_property
 from folioclient.decorators import retry_on_server_error
 
 CONTENT_TYPE_JSON = "application/json"
+try:
+    HTTPX_TIMEOUT = int(os.environ.get("FOLIOCLIENT_HTTP_TIMEOUT"))
+except TypeError:
+    HTTPX_TIMEOUT = None
 
 
 class FolioClient:
@@ -256,7 +260,7 @@ class FolioClient:
                 url,
                 json=payload,
                 headers=self.base_headers,
-                timeout=None,
+                timeout=HTTPX_TIMEOUT,
                 verify=self.ssl_verify,
             )
             req.raise_for_status()
@@ -268,7 +272,7 @@ class FolioClient:
                     url,
                     json=payload,
                     headers=self.base_headers,
-                    timeout=None,
+                    timeout=HTTPX_TIMEOUT,
                     verify=self.ssl_verify,
                 )
                 req.raise_for_status()
@@ -293,7 +297,7 @@ class FolioClient:
         :param kwargs: Additional url parameters to pass to `path`.
         :return: An iterable object yielding a single record at a time.
         """
-        with httpx.Client(timeout=None, verify=self.ssl_verify) as httpx_client:
+        with httpx.Client(timeout=HTTPX_TIMEOUT, verify=self.ssl_verify) as httpx_client:
             self.httpx_client = httpx_client
             offset = 0
             query = query or " ".join((self.cql_all, "sortBy id"))
@@ -361,7 +365,7 @@ class FolioClient:
                 url,
                 params=query_params,
                 headers=self.okapi_headers,
-                timeout=None,
+                timeout=HTTPX_TIMEOUT,
                 verify=self.ssl_verify,
             )
             req.raise_for_status()
@@ -375,7 +379,6 @@ class FolioClient:
                 url,
                 headers=self.okapi_headers,
                 json=payload,
-                verify=self.ssl_verify,
                 params=query_params,
             )
             req.raise_for_status()
@@ -392,7 +395,6 @@ class FolioClient:
                 url,
                 headers=self.okapi_headers,
                 json=payload,
-                verify=self.ssl_verify,
                 params=query_params,
             )
             req.raise_for_status()
@@ -403,7 +405,7 @@ class FolioClient:
 
     def get_folio_http_client(self):
         """Returns a httpx client for use in FOLIO communication"""
-        return httpx.Client(timeout=None, verify=self.ssl_verify)
+        return httpx.Client(timeout=HTTPX_TIMEOUT, verify=self.ssl_verify)
 
     def folio_get_single_object(self, path):
         """Fetches data from FOLIO and turns it into a json object as is"""
@@ -450,7 +452,7 @@ class FolioClient:
         req = httpx.get(
             latest_path,
             headers=github_headers,
-            timeout=None,
+            timeout=HTTPX_TIMEOUT,
             follow_redirects=True,
             verify=ssl_verify,
         )
@@ -463,7 +465,7 @@ class FolioClient:
         req = httpx.get(
             latest_path,
             headers=github_headers,
-            timeout=None,
+            timeout=HTTPX_TIMEOUT,
             follow_redirects=True,
             verify=ssl_verify,
         )
@@ -494,7 +496,7 @@ class FolioClient:
             req = httpx.get(
                 f_path,
                 headers=github_headers,
-                timeout=None,
+                timeout=HTTPX_TIMEOUT,
                 follow_redirects=True,
                 verify=ssl_verify,
             )
@@ -507,7 +509,11 @@ class FolioClient:
             f_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{version}/{filepath}"
         # print(latest_path)
         req = httpx.get(
-            f_path, headers=github_headers, timeout=None, follow_redirects=True, verify=ssl_verify
+            f_path,
+            headers=github_headers,
+            timeout=HTTPX_TIMEOUT,
+            follow_redirects=True,
+            verify=ssl_verify,
         )
         req.raise_for_status()
         if filepath.endswith("json"):
