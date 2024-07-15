@@ -30,7 +30,7 @@ jobs:
     
     - name: Install Flake8
       run: |
-        poetry add flake8 --dev
+        python -m pip install flake8
     
     - name: Lint with flake8
       run: |
