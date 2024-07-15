@@ -1,5 +1,5 @@
 import pytest
-from folioclient.FolioClient import FolioClient
+from folioclient import FolioClient
 from httpx import HTTPError, UnsupportedProtocol
 
 
