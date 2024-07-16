@@ -11,6 +11,9 @@ import httpx
 def retry_on_server_error(func):
     """Retry a function if a temporary server error is encountered.
 
+    Args:
+        func: The function to be retried.
+
     Returns:
         The decorated function.
     """
