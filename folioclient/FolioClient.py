@@ -286,7 +286,7 @@ class FolioClient:
         self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
 
     def get_single_instance(self, instance_id):
-        return self.folio_get_all(f"inventory/instances/{instance_id}")
+        return self.folio_get_single_object(f"inventory/instances/{instance_id}")
 
     def folio_get_all(self, path, key=None, query=None, limit=10, **kwargs):
         """
