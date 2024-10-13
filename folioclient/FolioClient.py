@@ -30,6 +30,7 @@ RAML_UTIL_URL = "https://raw.githubusercontent.com/folio-org/raml/raml1.0"
 
 USER_AGENT_STRING = "Folio Client (https://github.com/FOLIO-FSE/FolioClient)"
 
+
 class FolioClient:
     """handles communication and getting values from FOLIO"""
 
@@ -445,7 +446,7 @@ class FolioClient:
     ):  # noqa: S107
         github_headers = {
             "content-type": CONTENT_TYPE_JSON,
-            "User-Agent": USER_AGENT_STRING,",
+            "User-Agent": USER_AGENT_STRING,
         }
         if personal_access_token:
             github_headers["authorization"] = f"token {personal_access_token}"
