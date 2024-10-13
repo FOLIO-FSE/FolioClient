@@ -77,13 +77,19 @@ class FolioClient:
             self.okapi_headers["x-okapi-tenant"] = current_tenant_id
             return resp["id"]
         except Exception as exception:
-            logging.error(f"Unable to fetch user id for user {self.username}", exc_info=exception)
+            logging.error(
+                f"Unable to fetch user id for user {self.username}", exc_info=exception
+            )
             self.okapi_headers["x-okapi-tenant"] = current_tenant_id
             return ""
 
     @cached_property
     def identifier_types(self):
-        return list(self.folio_get_all("/identifier-types", "identifierTypes", self.cql_all, 1000))
+        return list(
+            self.folio_get_all(
+                "/identifier-types", "identifierTypes", self.cql_all, 1000
+            )
+        )
 
     @cached_property
     def module_versions(self):
@@ -91,7 +97,9 @@ class FolioClient:
         try:
             resp = self.folio_get(f"/_/proxy/tenants/{self.tenant_id}/modules")
         except httpx.HTTPError:
-            entitlements = self.folio_get(f"/entitlements/{self.tenant_id}/applications")
+            entitlements = self.folio_get(
+                f"/entitlements/{self.tenant_id}/applications"
+            )
             resp = []
             for app in entitlements["applicationDescriptors"]:
                 for md in app["modules"]:
@@ -104,13 +112,17 @@ class FolioClient:
         Returns a list of statistical codes.
         """
         return list(
-            self.folio_get_all("/statistical-codes", "statisticalCodes", self.cql_all, 1000)
+            self.folio_get_all(
+                "/statistical-codes", "statisticalCodes", self.cql_all, 1000
+            )
         )
 
     @cached_property
     def contributor_types(self):
         return list(
-            self.folio_get_all("/contributor-types", "contributorTypes", self.cql_all, 1000)
+            self.folio_get_all(
+                "/contributor-types", "contributorTypes", self.cql_all, 1000
+            )
         )
 
     @cached_property
@@ -123,11 +135,17 @@ class FolioClient:
 
     @cached_property
     def instance_types(self):
-        return list(self.folio_get_all("/instance-types", "instanceTypes", self.cql_all, 1000))
+        return list(
+            self.folio_get_all("/instance-types", "instanceTypes", self.cql_all, 1000)
+        )
 
     @cached_property
     def instance_formats(self):
-        return list(self.folio_get_all("/instance-formats", "instanceFormats", self.cql_all, 1000))
+        return list(
+            self.folio_get_all(
+                "/instance-formats", "instanceFormats", self.cql_all, 1000
+            )
+        )
 
     @cached_property
     def alt_title_types(self):
@@ -155,13 +173,17 @@ class FolioClient:
     @cached_property
     def instance_note_types(self):
         return list(
-            self.folio_get_all("/instance-note-types", "instanceNoteTypes", self.cql_all, 1000)
+            self.folio_get_all(
+                "/instance-note-types", "instanceNoteTypes", self.cql_all, 1000
+            )
         )
 
     @cached_property
     def class_types(self):
         return list(
-            self.folio_get_all("/classification-types", "classificationTypes", self.cql_all, 1000)
+            self.folio_get_all(
+                "/classification-types", "classificationTypes", self.cql_all, 1000
+            )
         )
 
     @cached_property
@@ -178,22 +200,32 @@ class FolioClient:
     @cached_property
     def holding_note_types(self):
         return list(
-            self.folio_get_all("/holdings-note-types", "holdingsNoteTypes", self.cql_all, 1000)
+            self.folio_get_all(
+                "/holdings-note-types", "holdingsNoteTypes", self.cql_all, 1000
+            )
         )
 
     @cached_property
     def call_number_types(self):
         return list(
-            self.folio_get_all("/call-number-types", "callNumberTypes", self.cql_all, 1000)
+            self.folio_get_all(
+                "/call-number-types", "callNumberTypes", self.cql_all, 1000
+            )
         )
 
     @cached_property
     def holdings_types(self):
-        return list(self.folio_get_all("/holdings-types", "holdingsTypes", self.cql_all, 1000))
+        return list(
+            self.folio_get_all("/holdings-types", "holdingsTypes", self.cql_all, 1000)
+        )
 
     @cached_property
     def modes_of_issuance(self):
-        return list(self.folio_get_all("/modes-of-issuance", "issuanceModes", self.cql_all, 1000))
+        return list(
+            self.folio_get_all(
+                "/modes-of-issuance", "issuanceModes", self.cql_all, 1000
+            )
+        )
 
     @cached_property
     def authority_source_files(self):
@@ -284,7 +316,9 @@ class FolioClient:
             else:
                 raise
         response_body = req.json()
-        self._okapi_token = req.headers.get("x-okapi-token") or req.cookies.get("folioAccessToken")
+        self._okapi_token = req.headers.get("x-okapi-token") or req.cookies.get(
+            "folioAccessToken"
+        )
         self.okapi_token_expires = date_parse(
             response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z")
         )
@@ -302,7 +336,9 @@ class FolioClient:
         :param kwargs: Additional url parameters to pass to `path`.
         :return: An iterable object yielding a single record at a time.
         """
-        with httpx.Client(timeout=HTTPX_TIMEOUT, verify=self.ssl_verify) as httpx_client:
+        with httpx.Client(
+            timeout=HTTPX_TIMEOUT, verify=self.ssl_verify
+        ) as httpx_client:
             self.httpx_client = httpx_client
             offset = 0
             query = query or " ".join((self.cql_all, "sortBy id"))
@@ -338,7 +374,9 @@ class FolioClient:
         """
         params = kwargs
         if query := kwargs.get("query"):
-            if query.startswith(("?", "query=")):  # Handle previous query specification syntax
+            if query.startswith(
+                ("?", "query=")
+            ):  # Handle previous query specification syntax
                 params["query"] = query.split("=", maxsplit=1)[1]
             else:
                 params["query"] = query
@@ -363,7 +401,9 @@ class FolioClient:
         elif query:
             query_params = self._construct_query_parameters(query=query)
         if self.httpx_client and not self.httpx_client.is_closed:
-            req = self.httpx_client.get(url, params=query_params, headers=self.okapi_headers)
+            req = self.httpx_client.get(
+                url, params=query_params, headers=self.okapi_headers
+            )
             req.raise_for_status()
         else:
             req = httpx.get(
@@ -418,7 +458,9 @@ class FolioClient:
 
     def get_instance_json_schema(self):
         """Fetches the JSON Schema for instances"""
-        return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/instance.json")
+        return self.get_from_github(
+            "folio-org", "mod-inventory-storage", "/ramls/instance.json"
+        )
 
     def get_holdings_schema(self):
         """Fetches the JSON Schema for holdings"""
@@ -438,12 +480,12 @@ class FolioClient:
 
     def get_item_schema(self):
         """Fetches the JSON Schema for holdings"""
-        return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/item.json")
+        return self.get_from_github(
+            "folio-org", "mod-inventory-storage", "/ramls/item.json"
+        )
 
     @staticmethod
-    def get_latest_from_github(
-        owner, repo, filepath: str, personal_access_token="", ssl_verify=True
-    ):  # noqa: S107
+    def get_github_request_headers():
         github_headers = {
             "content-type": CONTENT_TYPE_JSON,
             "User-Agent": USER_AGENT_STRING,
@@ -451,10 +493,14 @@ class FolioClient:
         if os.environ.get("GITHUB_TOKEN"):
             logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
             github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
+        return github_headers
+
+    @staticmethod
+    def get_latest_from_github(owner, repo, filepath: str, ssl_verify=True):  # noqa: S107
         latest_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
         req = httpx.get(
             latest_path,
-            headers=github_headers,
+            headers=FolioClient.get_github_request_headers(),
             timeout=HTTPX_TIMEOUT,
             follow_redirects=True,
             verify=ssl_verify,
@@ -463,7 +509,9 @@ class FolioClient:
         latest = json.loads(req.text)
         # print(json.dumps(latest, indent=4))
         latest_tag = latest["tag_name"]
-        latest_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
+        latest_path = (
+            f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
+        )
         # print(latest_path)
         schema = FolioClient.fetch_github_schema(latest_path)
         dereferenced = jsonref.replace_refs(
@@ -476,18 +524,11 @@ class FolioClient:
 
     def get_from_github(self, owner, repo, filepath: str, ssl_verify=True):  # noqa: S107
         version = self.get_module_version(repo)
-        github_headers = {
-            "content-type": CONTENT_TYPE_JSON,
-            "User-Agent": USER_AGENT_STRING,
-        }
-        if os.environ.get("GITHUB_TOKEN"):
-            logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
-            github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         if not version:
             f_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
             req = httpx.get(
                 f_path,
-                headers=github_headers,
+                headers=FolioClient.get_github_request_headers(),
                 timeout=HTTPX_TIMEOUT,
                 follow_redirects=True,
                 verify=ssl_verify,
@@ -498,7 +539,9 @@ class FolioClient:
             latest_tag = latest["tag_name"]
             f_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
         else:
-            f_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{version}/{filepath}"
+            f_path = (
+                f"https://raw.githubusercontent.com/{owner}/{repo}/{version}/{filepath}"
+            )
         # print(latest_path)
         schema = FolioClient.fetch_github_schema(f_path)
         dereferenced = jsonref.replace_refs(
@@ -522,16 +565,9 @@ class FolioClient:
         Returns
             The fixed schema.
         """
-        github_headers = {
-            "content-type": CONTENT_TYPE_JSON,
-            "User-Agent": USER_AGENT_STRING,
-        }
-        if os.environ.get("GITHUB_TOKEN"):
-            logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
-            github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         schema_response = httpx.get(
             schema_url,
-            headers=github_headers,
+            headers=FolioClient.get_github_request_headers(),
             timeout=HTTPX_TIMEOUT,
             follow_redirects=True,
         )
@@ -584,7 +620,7 @@ class FolioClient:
                     "No catch_all/default location either"
                 )
             ) from exc
-
+    
     def get_metadata_construct(self):
         """creates a metadata construct with the current API user_id
         attached"""
@@ -609,10 +645,14 @@ class FolioClient:
         print(f"{total} {path} found, picking {count} from {rand} onwards")
         return list(self.folio_get(path, name, query_params=query_params))
 
-    def get_loan_policy_id(self, item_type_id, loan_type_id, patron_group_id, location_id):
+    def get_loan_policy_id(
+        self, item_type_id, loan_type_id, patron_group_id, location_id
+    ):
         """retrieves a loan policy from FOLIO, or uses a chached one"""
 
-        lp_hash = get_loan_policy_hash(item_type_id, loan_type_id, patron_group_id, location_id)
+        lp_hash = get_loan_policy_hash(
+            item_type_id, loan_type_id, patron_group_id, location_id
+        )
         if lp_hash in self.loan_policies:
             return self.loan_policies[lp_hash]
         payload = {
@@ -641,18 +681,24 @@ class FolioClient:
         """Fetches data from FOLIO and turns it into a json object as is"""
         url = urljoin(self.okapi_url, f"users/{user['id']}")
         print(url)
-        req = httpx.put(url, headers=self.okapi_headers, json=user, verify=self.ssl_verify)
+        req = httpx.put(
+            url, headers=self.okapi_headers, json=user, verify=self.ssl_verify
+        )
         print(f"{req.status_code}")
         req.raise_for_status()
 
 
-def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id):
+def get_loan_policy_hash(
+    item_type_id, loan_type_id, patron_type_id, shelving_location_id
+):
     """Generate a hash of the circulation rule parameters that key a loan policy"""
     return str(
         hashlib.sha224(
-            ("".join([item_type_id, loan_type_id, patron_type_id, shelving_location_id])).encode(
-                "utf-8"
-            )
+            (
+                "".join(
+                    [item_type_id, loan_type_id, patron_type_id, shelving_location_id]
+                )
+            ).encode("utf-8")
         ).hexdigest()
     )
 
