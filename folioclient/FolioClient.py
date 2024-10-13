@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 from dateutil.parser import parse as date_parse
 import httpx
 import yaml
+import jsonref
 from openapi_schema_to_json_schema import to_json_schema
 from openapi_schema_to_json_schema import patternPropertiesHandler
 
@@ -24,6 +25,8 @@ try:
     HTTPX_TIMEOUT = int(os.environ.get("FOLIOCLIENT_HTTP_TIMEOUT"))
 except TypeError:
     HTTPX_TIMEOUT = None
+
+RAML_UTIL_URL = "https://raw.githubusercontent.com/folio-org/raml/raml1.0"
 
 
 class FolioClient:
@@ -253,7 +256,7 @@ class FolioClient:
         """Logs into FOLIO in order to get the folio access token."""
         payload = {"username": self.username, "password": self.password}
         # Transitional implementation to support Poppy and pre-Poppy authentication
-        url = urljoin(self.okapi_url, "/authn/login-with-expiry")
+        url = urljoin(self.okapi_url, "authn/login-with-expiry")
         # Poppy and later
         try:
             req = httpx.post(
@@ -267,7 +270,7 @@ class FolioClient:
         except httpx.HTTPStatusError:
             # Pre-Poppy
             if req.status_code == 404:
-                url = urljoin(self.okapi_url, "/authn/login")
+                url = urljoin(self.okapi_url, "authn/login")
                 req = httpx.post(
                     url,
                     json=payload,
@@ -352,7 +355,7 @@ class FolioClient:
         * query_params: Additional query parameters for the specified path. May also be used for
                 `query`
         """
-        url = urljoin(self.okapi_url, path).rstrip("/")
+        url = urljoin(self.okapi_url, path.lstrip("/")).rstrip("/")
         if query and query_params:
             query_params = self._construct_query_parameters(query=query, **query_params)
         elif query:
@@ -373,7 +376,7 @@ class FolioClient:
 
     def folio_put(self, path, payload, query_params: dict = None):
         """Convenience method to update data in FOLIO"""
-        url = urljoin(self.okapi_url, path).rstrip("/")
+        url = urljoin(self.okapi_url, path.lstrip("/")).rstrip("/")
         with self.get_folio_http_client() as httpx_client:
             req = httpx_client.put(
                 url,
@@ -389,7 +392,7 @@ class FolioClient:
 
     def folio_post(self, path, payload, query_params: dict = None):
         """Convenience method to post data to FOLIO"""
-        url = urljoin(self.okapi_url, path).rstrip("/")
+        url = urljoin(self.okapi_url, path.lstrip("/")).rstrip("/")
         with self.get_folio_http_client() as httpx_client:
             req = httpx_client.post(
                 url,
@@ -508,21 +511,49 @@ class FolioClient:
         else:
             f_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{version}/{filepath}"
         # print(latest_path)
-        req = httpx.get(
-            f_path,
+        schema = FolioClient.fetch_github_schema(f_path)
+        dereferenced = jsonref.replace_refs(
+            schema,
+            loader=FolioClient.fetch_github_schema,
+            base_uri=f_path,
+            proxies=False,
+        )
+        return dereferenced
+
+    @staticmethod
+    def fetch_github_schema(schema_url):
+        """
+        Fixes relative $ref references in the schema that refer to submodules,
+        like raml-util.This method can be used as a loader in
+        `jsonref.replace_refs`.
+
+        Params
+            schema_url: The URL of the schema to fix.
+
+        Returns
+            The fixed schema.
+        """
+        github_headers = {
+            "content-type": CONTENT_TYPE_JSON,
+            "User-Agent": "Folio Client (https://github.com/FOLIO-FSE/FolioClient)",
+            "Authorization": f"token {os.environ.get('GITHUB_TOKEN', '')}",
+        }
+        schema_response = httpx.get(
+            schema_url,
             headers=github_headers,
             timeout=HTTPX_TIMEOUT,
             follow_redirects=True,
-            verify=ssl_verify,
         )
-        req.raise_for_status()
-        if filepath.endswith("json"):
-            return json.loads(req.text)
-        elif filepath.endswith("yaml"):
-            yaml_rep = yaml.safe_load(req.text)
-            return to_json_schema(yaml_rep)
+        schema_response.raise_for_status()
+        fix_refs = schema_response.text.replace("../raml-util", RAML_UTIL_URL).replace(
+            "raml-util", RAML_UTIL_URL
+        )
+        if schema_url.endswith("yaml"):
+            return to_json_schema(yaml.safe_load(fix_refs))
+        elif schema_url.endswith("json") or schema_url.endswith("schema"):
+            return json.loads(fix_refs)
         else:
-            raise ValueError("Unknown file ending in %s", filepath)
+            raise ValueError(f"Unknown file ending in {schema_url}")
 
     def get_module_version(self, module_name: str):
         if res := next(
@@ -617,7 +648,7 @@ class FolioClient:
 
     def put_user(self, user):
         """Fetches data from FOLIO and turns it into a json object as is"""
-        url = urljoin(self.okapi_url, f"/users/{user['id']}")
+        url = urljoin(self.okapi_url, f"users/{user['id']}")
         print(url)
         req = httpx.put(url, headers=self.okapi_headers, json=user, verify=self.ssl_verify)
         print(f"{req.status_code}")
