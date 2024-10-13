@@ -448,9 +448,7 @@ class FolioClient:
             "content-type": CONTENT_TYPE_JSON,
             "User-Agent": USER_AGENT_STRING,
         }
-        if personal_access_token:
-            github_headers["authorization"] = f"token {personal_access_token}"
-        elif os.environ.get("GITHUB_TOKEN"):
+        if os.environ.get("GITHUB_TOKEN"):
             logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
             github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         latest_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
@@ -467,33 +465,22 @@ class FolioClient:
         latest_tag = latest["tag_name"]
         latest_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
         # print(latest_path)
-        req = httpx.get(
-            latest_path,
-            headers=github_headers,
-            timeout=HTTPX_TIMEOUT,
-            follow_redirects=True,
-            verify=ssl_verify,
+        schema = FolioClient.fetch_github_schema(latest_path)
+        dereferenced = jsonref.replace_refs(
+            schema,
+            loader=FolioClient.fetch_github_schema,
+            base_uri=latest_path,
+            proxies=False,
         )
-        req.raise_for_status()
-        if filepath.endswith("json"):
-            return json.loads(req.text)
-        elif filepath.endswith("yaml"):
-            yaml_rep = yaml.safe_load(req.text)
-            return to_json_schema(yaml_rep)
-        else:
-            raise ValueError(f"Unknown file ending in {filepath}")
+        return dereferenced
 
-    def get_from_github(
-        self, owner, repo, filepath: str, personal_access_token="", ssl_verify=True
-    ):  # noqa: S107
+    def get_from_github(self, owner, repo, filepath: str, ssl_verify=True):  # noqa: S107
         version = self.get_module_version(repo)
         github_headers = {
             "content-type": CONTENT_TYPE_JSON,
             "User-Agent": USER_AGENT_STRING,
         }
-        if personal_access_token:
-            github_headers["authorization"] = f"token {personal_access_token}"
-        elif os.environ.get("GITHUB_TOKEN"):
+        if os.environ.get("GITHUB_TOKEN"):
             logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
             github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         if not version:
@@ -538,8 +525,10 @@ class FolioClient:
         github_headers = {
             "content-type": CONTENT_TYPE_JSON,
             "User-Agent": USER_AGENT_STRING,
-            "Authorization": f"token {os.environ.get('GITHUB_TOKEN', '')}",
         }
+        if os.environ.get("GITHUB_TOKEN"):
+            logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
+            github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         schema_response = httpx.get(
             schema_url,
             headers=github_headers,
