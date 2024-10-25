@@ -4,21 +4,20 @@ import logging
 import os
 import random
 import re
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
 from datetime import timezone as tz
-from typing import Any
-from typing import Dict
+from typing import Any, Dict
 from urllib.parse import urljoin
-from dateutil.parser import parse as date_parse
+
 import httpx
-import yaml
 import jsonref
+import yaml
+from dateutil.parser import parse as date_parse
 from openapi_schema_to_json_schema import to_json_schema
-from openapi_schema_to_json_schema import patternPropertiesHandler
 
 from folioclient.cached_property import cached_property
 from folioclient.decorators import retry_on_server_error
+from folioclient.exceptions import FolioClientClosed
 
 CONTENT_TYPE_JSON = "application/json"
 try:
@@ -56,10 +55,33 @@ class FolioClient:
             "content-type": CONTENT_TYPE_JSON,
         }
         self._okapi_headers = {}
+        self.is_closed = False
         self.login()
 
     def __repr__(self) -> str:
         return f"FolioClient for tenant {self.tenant_id} at {self.okapi_url} as {self.username}"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        with self.get_folio_http_client() as httpx_client:
+            if self.cookies:
+                logging.info("Logging out...")
+                logout = httpx_client.post(
+                    urljoin(self.okapi_url, "authn/logout"), cookies=self.cookies
+                )
+                logout.raise_for_status()
+                logging.info("Logged out")
+        self.username = None
+        self.password = None
+        self._okapi_token = None
+        if self.httpx_client and not self.httpx_client.is_closed:
+            self.httpx_client.close()
+        self.is_closed = True
+
+    def close(self):
+        self.__exit__(None, None, None)
 
     @cached_property
     def current_user(self):
@@ -76,6 +98,21 @@ class FolioClient:
             resp = self.folio_get(path, "user")
             self.okapi_headers["x-okapi-tenant"] = current_tenant_id
             return resp["id"]
+        except httpx.HTTPStatusError:
+            logging.info("bl-users endpoint not found, trying /users endpoint instead.")
+            try:
+                path = "/users"
+                query = f"username=={self.username}"
+                resp = self.folio_get(path, "users", query=query)
+                self.okapi_headers["x-okapi-tenant"] = current_tenant_id
+                return resp[0]["id"]
+            except Exception as exception:
+                logging.error(
+                    f"Unable to fetch user id for user {self.username}",
+                    exc_info=exception,
+                )
+                self.okapi_headers["x-okapi-tenant"] = current_tenant_id
+                return ""
         except Exception as exception:
             logging.error(
                 f"Unable to fetch user id for user {self.username}", exc_info=exception
@@ -275,36 +312,28 @@ class FolioClient:
         Returns:
             str: The Okapi token.
         """
-        if datetime.now(tz.utc) > (
-            self.okapi_token_expires
-            - timedelta(
-                seconds=self.okapi_token_duration.total_seconds()
-                * self.okapi_token_time_remaining_threshold
-            )
-        ):
-            self.login()
-        return self._okapi_token
+        if not self.is_closed:
+            if datetime.now(tz.utc) > (
+                self.okapi_token_expires
+                - timedelta(
+                    seconds=self.okapi_token_duration.total_seconds()
+                    * self.okapi_token_time_remaining_threshold
+                )
+            ):
+                self.login()
+            return self._okapi_token
+        else:
+            raise FolioClientClosed()
 
     @retry_on_server_error
     def login(self):
         """Logs into FOLIO in order to get the folio access token."""
-        payload = {"username": self.username, "password": self.password}
-        # Transitional implementation to support Poppy and pre-Poppy authentication
-        url = urljoin(self.okapi_url, "authn/login-with-expiry")
-        # Poppy and later
-        try:
-            req = httpx.post(
-                url,
-                json=payload,
-                headers=self.base_headers,
-                timeout=HTTPX_TIMEOUT,
-                verify=self.ssl_verify,
-            )
-            req.raise_for_status()
-        except httpx.HTTPStatusError:
-            # Pre-Poppy
-            if req.status_code == 404:
-                url = urljoin(self.okapi_url, "authn/login")
+        if not self.is_closed:
+            payload = {"username": self.username, "password": self.password}
+            # Transitional implementation to support Poppy and pre-Poppy authentication
+            url = urljoin(self.okapi_url, "authn/login-with-expiry")
+            # Poppy and later
+            try:
                 req = httpx.post(
                     url,
                     json=payload,
@@ -313,16 +342,38 @@ class FolioClient:
                     verify=self.ssl_verify,
                 )
                 req.raise_for_status()
-            else:
-                raise
-        response_body = req.json()
-        self._okapi_token = req.headers.get("x-okapi-token") or req.cookies.get(
-            "folioAccessToken"
-        )
-        self.okapi_token_expires = date_parse(
-            response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z")
-        )
-        self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
+            except httpx.HTTPStatusError:
+                # Pre-Poppy
+                if req.status_code == 404:
+                    url = urljoin(self.okapi_url, "authn/login")
+                    req = httpx.post(
+                        url,
+                        json=payload,
+                        headers=self.base_headers,
+                        timeout=HTTPX_TIMEOUT,
+                        verify=self.ssl_verify,
+                    )
+                    req.raise_for_status()
+                else:
+                    raise
+            response_body = req.json()
+            self.cookies = req.cookies
+            self._okapi_token = req.headers.get("x-okapi-token") or req.cookies.get(
+                "folioAccessToken"
+            )
+            self.okapi_token_expires = date_parse(
+                response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z")
+            )
+            self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
+        else:
+            raise FolioClientClosed()
+
+    def logout(self):
+        """Alias for `close`"""
+        if not self.is_closed:
+            self.close()
+        else:
+            raise FolioClientClosed()
 
     def get_single_instance(self, instance_id):
         return self.folio_get_single_object(f"inventory/instances/{instance_id}")
@@ -620,15 +671,15 @@ class FolioClient:
                     "No catch_all/default location either"
                 )
             ) from exc
-    
+
     def get_metadata_construct(self):
         """creates a metadata construct with the current API user_id
         attached"""
         user_id = self.current_user
         return {
-            "createdDate": datetime.utcnow().isoformat(timespec="milliseconds"),
+            "createdDate": datetime.now(tz=tz.utc).isoformat(timespec="milliseconds"),
             "createdByUserId": user_id,
-            "updatedDate": datetime.utcnow().isoformat(timespec="milliseconds"),
+            "updatedDate": datetime.now(tz=tz.utc).isoformat(timespec="milliseconds"),
             "updatedByUserId": user_id,
         }
 
