@@ -69,7 +69,9 @@ class FolioClient:
             if self.cookies:
                 logging.info("Logging out...")
                 logout = httpx_client.post(
-                    urljoin(self.okapi_url, "authn/logout"), cookies=self.cookies
+                    urljoin(self.okapi_url, "authn/logout"),
+                    headers=self.base_headers,
+                    cookies=self.cookies,
                 )
                 logout.raise_for_status()
                 logging.info("Logged out")
