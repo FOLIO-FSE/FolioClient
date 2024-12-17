@@ -275,6 +275,15 @@ class FolioClient:
             )
         )
 
+    @cached_property
+    def subject_types(self):
+        """Cached property for all configured subject types"""
+        return list(
+            self.folio_get_all(
+                "/subject-types", "subjectTypes", self.cql_all, 1000
+            )
+        )
+
     @property
     def okapi_headers(self):
         """
