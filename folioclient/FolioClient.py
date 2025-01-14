@@ -428,6 +428,61 @@ class FolioClient:
                 ),
             )
 
+    def folio_get_all_by_id_offset(self, path, key=None, query=None, limit=10, **kwargs):
+        """
+        Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
+        an iterable object yielding a single record at a time until all records have been returned.
+        :param query: The query string to filter the data objects.
+        :param limit: The maximum number of records to fetch in each chunk.
+        :param kwargs: Additional url parameters to pass to `path`.
+        :return: An iterable object yielding a single record at a time.
+        """
+        with httpx.Client(
+            timeout=HTTPX_TIMEOUT, verify=self.ssl_verify
+        ) as httpx_client:
+            self.httpx_client = httpx_client
+            offset = None
+            if not query:
+                query="cql.allRecords=1 sortBy id"
+            if "sortBy id" not in query:
+                raise ValueError("FOLIO query must be sorted by ID")
+            query = query or " ".join((self.cql_all, "sortBy id"))
+            query_params: Dict[str, Any] = self._construct_query_parameters(
+                query=query, limit=limit, **kwargs
+            )
+            temp_res = self.folio_get(path, key, query_params=query_params)
+            try:
+                offset = temp_res[-1]['id']
+            except IndexError:
+                yield from temp_res
+                return
+            yield from temp_res
+            while len(temp_res) == limit:
+                query_params = self._construct_query_parameters(
+                    query=query, limit=limit, **kwargs
+                )
+                query_params['query'] = f"id>\"{offset}\" and " + query_params['query']
+                temp_res = self.folio_get(
+                    path,
+                    key,
+                    query_params=query_params,
+                )
+                try:
+                    offset = temp_res[-1]['id']
+                except IndexError:
+                    yield from temp_res
+                    return
+                yield from temp_res
+            query_params = self._construct_query_parameters(
+                    query=query, limit=limit, **kwargs
+                )
+            query_params['query'] = f"id>\"{offset}\" and " + query_params['query']
+            yield from self.folio_get(
+                path,
+                key,
+                query_params=query_params,
+            )
+
     def _construct_query_parameters(self, **kwargs) -> Dict[str, Any]:
         """Private method to construct query parameters for folio_get or httpx client calls
 
@@ -512,7 +567,11 @@ class FolioClient:
 
     def get_folio_http_client(self):
         """Returns a httpx client for use in FOLIO communication"""
-        return httpx.Client(timeout=HTTPX_TIMEOUT, verify=self.ssl_verify)
+        return httpx.Client(
+            timeout=HTTPX_TIMEOUT,
+            verify=self.ssl_verify,
+            base_url=self.okapi_url
+        )
 
     def folio_get_single_object(self, path):
         """Fetches data from FOLIO and turns it into a json object as is"""
