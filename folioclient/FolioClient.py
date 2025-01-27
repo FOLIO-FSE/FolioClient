@@ -277,12 +277,26 @@ class FolioClient:
 
     @cached_property
     def subject_types(self):
-        """Cached property for all configured subject types"""
-        return list(
-            self.folio_get_all(
-                "/subject-types", "subjectTypes", self.cql_all, 1000
+        """
+        Cached property for all configured subject types
+        
+        Returns:
+            list: A list of subject types.
+
+        Current implementation returns an empty list if the 
+        subject-types endpoint is not found.
+        """
+        try:
+            return list(
+                self.folio_get_all(
+                    "/subject-types", "subjectTypes", self.cql_all, 1000
+                )
             )
-        )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return []
+            else:
+                raise
 
     @property
     def okapi_headers(self):
