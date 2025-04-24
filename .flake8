@@ -1,2 +1,2 @@
 [flake8]
-exclude = .git,__pycache__,docs/source/conf.py,old,build,dist,.venv,.nox,.pytest_cache,.mypy_cache,.vscode,tests/,noxfile.py,integration_test.py
+exclude = .git,__pycache__,docs/source/conf.py,old,build,dist,.venv,.nox,.pytest_cache,.mypy_cache,.vscode,tests/*.py,noxfile.py,integration_test.py
