@@ -15,16 +15,22 @@ Test
 ## Basic Usage
 
 ### Create a new FolioClient instance
-```
+```Python
 import os
 from folioclient import FolioClient
-fc = FolioClient("https://folio-snapshot-okapi.dev.folio.org", "diku", "diku_admin", os.environ.get("FOLIO_PASSWORD")) # Best Practice: use an environment variable to store your passwords
+
+fc = FolioClient(
+    "https://folio-snapshot-okapi.dev.folio.org", 
+    "diku", 
+    "diku_admin", 
+    os.environ.get("FOLIO_PASSWORD")
+) # Best Practice: use an environment variable to store your passwords
 ```
 
 ### Query an endpoint in FOLIO
 ```Python
 # Basic query, limit=100
-instances = fc.folio_get("/instance-storage/", key="instances", query_params={"limit": 100})
+instances = fc.folio_get("/instance-storage/instances", key="instances", query_params={"limit": 100})
 
 # mod-search query for all instances without holdings records, expand all sub-objects
 instance_search = fc.folio_get(
