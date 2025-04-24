@@ -18,7 +18,7 @@ Test
 ```
 import os
 from folioclient import FolioClient
-fc = FolioClient("https://folio-snapshot-okapi.dev.folio.org", "diku", "diku_admin", os.environ.get("FOLIO_PASSWORD")) # Best Practice: use an environment variable to store you're passwords
+fc = FolioClient("https://folio-snapshot-okapi.dev.folio.org", "diku", "diku_admin", os.environ.get("FOLIO_PASSWORD")) # Best Practice: use an environment variable to store your passwords
 ```
 
 ### Query an endpoint in FOLIO
