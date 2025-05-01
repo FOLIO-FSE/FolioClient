@@ -1,7 +1,6 @@
 # FolioClient
-![example workflow](https://github.com/fontanka16/FolioClient/actions/workflows/python-package.yml/badge.svg)    
+![example workflow](https://github.com/folio-fse/FolioClient/actions/workflows/python-package.yml/badge.svg)    
 FOLIO Client is a simple python (3) wrapper over the FOLIO LMS system API:s
-Test
 
 ## Features
 * Convenient FOLIO login and OKAPI Token creation
@@ -64,7 +63,7 @@ for instance in get_all_instances:
 ```
 
 ### Convenience methods for basic FOLIO HTTP Actions (GET, PUT, POST)
-FolioClient objects provide convenience methods for standard GET, PUT, and POST HTTP requests. In addition to the `folio_get` examples above:
+FolioClient objects provide convenience methods for standard GET, PUT, POST and DELETE HTTP requests. In addition to the `folio_get` examples above:
 ```Python
 # Put an existing object, return is based on the endpoint, often an empty 204 response
 instance = instances[0]
@@ -90,7 +89,7 @@ If you would rather roll your own http requests, you can use FolioClient simply 
 ```Python
 import requests
 with requests.Session() as client:
-    response = client.get(fc.okapi_url + "/instance-storage/instances", headers=fc.okapi_headers)
+    response = client.get(fc.gateway_url + "/instance-storage/instances", headers=fc.okapi_headers)
     response.raise_for_status()
     print(response.json())
 ```
