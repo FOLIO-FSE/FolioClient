@@ -176,7 +176,7 @@ def folio_retry_on_auth_error(func):
                 folio_client.login()
             try:
                 return func(*args, **kwargs)
-            except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
+            except httpx.HTTPStatusError as exc:
                 if should_retry_on_auth_error(exc):
                     handle_retry(func, exc, retry, max_retries, retry_delay)
                     retry_delay *= retry_factor
@@ -238,3 +238,74 @@ def should_retry_on_auth_error(exc):
         True if the request should be retried, False otherwise
     """
     return exc.response.status_code in [401, 403]
+
+
+def handle_remote_protocol_error(func):
+    """
+    Decorator to catch httpx.RemoteProtocolError, recreate the httpx.Client,
+    and retry the request.
+    """
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except httpx.RemoteProtocolError:
+            logging.warning("Caught httpx.RemoteProtocolError. Recreate httpx.Client and retry.")
+            # Close the existing client if it exists
+            if self.httpx_client and not self.httpx_client.is_closed:
+                self.httpx_client.close()
+            # Recreate the httpx.Client
+            self.httpx_client = httpx.Client(
+                timeout=self.http_timeout,
+                verify=self.ssl_verify,
+                base_url=self.gateway_url,
+            )
+            # Retry the request
+            return func(self, *args, **kwargs)
+
+    return wrapper
+
+
+def use_client_session_with_generator(func):
+    """
+    Decorator to use or create an httpx.Client session for the FolioClient
+    if one is not already created or the existing httpx.Client is closed
+    """
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if not self.httpx_client or self.httpx_client.is_closed:
+            with httpx.Client(
+                timeout=self.http_timeout,
+                verify=self.ssl_verify,
+                base_url=self.gateway_url,
+            ) as httpx_client:
+                self.httpx_client = httpx_client
+                yield from func(self, *args, **kwargs)
+        else:
+            yield from func(self, *args, **kwargs)
+
+    return wrapper
+
+
+def use_client_session(func):
+    """
+    Decorator to use or create an httpx.Client session for the FolioClient
+    if one is not already created or the existing httpx.Client is closed
+    """
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if not self.httpx_client or self.httpx_client.is_closed:
+            with httpx.Client(
+                timeout=self.http_timeout,
+                verify=self.ssl_verify,
+                base_url=self.gateway_url,
+            ) as httpx_client:
+                self.httpx_client = httpx_client
+                return func(self, *args, **kwargs)
+        else:
+            return func(self, *args, **kwargs)
+
+    return wrapper
