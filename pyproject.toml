@@ -1,6 +1,6 @@
 [project]
 name = "folioclient"
-version = "0.70.0"
+version = "0.70.1"
 description = "An API wrapper over the FOLIO LSP API Suite (Formerly OKAPI)."
 authors = [
     { name = "Theodor Tolstoy", email = "github.teddes@tolstoy.se" },
@@ -12,7 +12,6 @@ keywords = ["FOLIO", "ILS", "LSP", "Library Systems", "MARC21", "Library data"]
 
 [project.urls]
 homepage = "https://github.com/FOLIO-FSE/folioclient"
-
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -51,3 +50,6 @@ pylint = "^2.17.2"
 
 [tool.poetry.extras]
 docs = ["m2r", "sphinx", "sphinx-autodoc-typehints", "sphinx-rtd-theme", "toml"]
+
+[tool.poetry.requires-plugins]
+poetry-plugin-export = ">=1.8"
