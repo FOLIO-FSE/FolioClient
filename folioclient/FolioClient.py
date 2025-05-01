@@ -6,20 +6,30 @@ import random
 import re
 from datetime import datetime, timedelta
 from datetime import timezone as tz
-from typing import Any, Dict
+from typing import Any, Dict, List, Union
 from urllib.parse import urljoin
+from warnings import warn
 
 import httpx
 import jsonref
 import yaml
+from httpx._types import CookieTypes
 from dateutil.parser import parse as date_parse
 from openapi_schema_to_json_schema import to_json_schema
 
 from folioclient.cached_property import cached_property
-from folioclient.decorators import folio_retry_on_server_error, folio_retry_on_auth_error
+from folioclient.decorators import (
+    folio_retry_on_auth_error,
+    folio_retry_on_server_error,
+    handle_remote_protocol_error,
+    use_client_session_with_generator,
+    use_client_session,
+)
 from folioclient.exceptions import FolioClientClosed
 
+# Constants
 CONTENT_TYPE_JSON = "application/json"
+
 try:
     HTTPX_TIMEOUT = int(os.environ.get("FOLIOCLIENT_HTTP_TIMEOUT"))
 except TypeError:
@@ -29,22 +39,64 @@ RAML_UTIL_URL = "https://raw.githubusercontent.com/folio-org/raml/raml1.0"
 
 USER_AGENT_STRING = "Folio Client (https://github.com/FOLIO-FSE/FolioClient)"
 
+# Set up logger
+logger = logging.getLogger("FolioClient")
+
 
 class FolioClient:
-    """handles communication and getting values from FOLIO"""
+    """A Python client for FOLIO APIs
 
-    def __init__(self, okapi_url, tenant_id, username, password, ssl_verify=True):
+    FOLIO: The Future of Libraries is Open, is a library services platform
+    that provides a set of APIs for managing library resources and services.
+
+    This class provides methods to interact with FOLIO APIs, including authentication,
+    data retrieval, and data manipulation. It also includes methods for handling
+    pagination and constructing query parameters.
+
+    Initialization:
+        FolioClient is designed to be used as a context manager
+
+        >>> from folioclient import FolioClient
+        >>> with FolioClient(
+        ...     "https://folio-snapshot-okapi.dev.folio.org",
+        ...     "diku",
+        ...     "diku_admin",
+        ...     "admin"
+        ... ) as folio_client:
+        ...     users = folio_client.folio_get("/users", "users", query="username==\"diku_admin\"")
+        ...     print(users)
+        ...
+        [{'username': 'diku_admin', 'id': '03d9f2b5-8429-50f8-a3af-0df1ce8be1d6', 'active': True, 'patronGroup': '3684a786-6671-4268-8ed0-9db82ebca60b', 'departments': [], 'proxyFor': [], 'personal': {'lastName': 'ADMINISTRATOR', 'firstName': 'DIKU', 'email': 'admin@diku.example.org', 'addresses': []}, 'createdDate': '2025-05-01T02:00:17.887+00:00', 'updatedDate': '2025-05-01T02:00:17.887+00:00', 'metadata': {'createdDate': '2025-05-01T01:56:12.945+00:00', 'updatedDate': '2025-05-01T02:00:17.882+00:00', 'updatedByUserId': '03d9f2b5-8429-50f8-a3af-0df1ce8be1d6'}, 'preferredEmailCommunication': []}]
+
+    Parameters:
+        gateway_url (str): The base URL for the FOLIO API.
+        tenant_id (str): The tenant ID for the FOLIO instance.
+        username (str): The username for authentication.
+        password (str): The password for authentication.
+        ssl_verify (bool): Whether to verify SSL certificates. Default is True.
+        okapi_url (keyword-only, str, optional): Deprecated. Use gateway_url instead.
+    """
+
+    def __init__(
+        self, gateway_url, tenant_id, username, password, ssl_verify=True, *, okapi_url=None
+    ):
+        if okapi_url:
+            warn(
+                "okapi_url argument is deprecated. Use gateway_url instead. Support for okapi_url will be removed in a future release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.http_timeout = HTTPX_TIMEOUT
         self.missing_location_codes = set()
         self.loan_policies = {}
         self.cql_all = "?query=cql.allRecords=1"
-        self.okapi_url = okapi_url
+        self.gateway_url = okapi_url or gateway_url
         self.tenant_id = tenant_id
         self.username = username
         self.password = password
         self.ssl_verify = ssl_verify
         self.httpx_client = None
         self.refresh_token = None
-        self.cookies = None
         self.okapi_token_expires = None
         self.okapi_token_duration = None
         self.okapi_token_time_remaining_threshold = float(
@@ -59,28 +111,69 @@ class FolioClient:
         self.login()
 
     def __repr__(self) -> str:
-        return f"FolioClient for tenant {self.tenant_id} at {self.okapi_url} as {self.username}"
+        return f"FolioClient for tenant {self.tenant_id} at {self.gateway_url} as {self.username}"
 
     def __enter__(self):
+        """Context manager for FolioClient"""
+        self.httpx_client = httpx.Client(
+            timeout=self.http_timeout,
+            verify=self.ssl_verify,
+            base_url=self.gateway_url,
+        )
         return self
 
+    @handle_remote_protocol_error
+    @use_client_session
     def __exit__(self, exc_type, exc_value, traceback):
-        with self.get_folio_http_client() as httpx_client:
-            if self.cookies:
-                logging.info("Logging out...")
-                logout = httpx_client.post(
-                    urljoin(self.okapi_url, "authn/logout"),
-                    headers=self.base_headers,
-                    cookies=self.cookies,
-                )
+        """Context manager exit method"""
+        if self.cookies:
+            logger.info("logging out...")
+            logout = self.httpx_client.post(
+                urljoin(self.gateway_url, "authn/logout"),
+                headers=self.base_headers,
+                cookies=self.cookies,
+            )
+            try:
                 logout.raise_for_status()
-                logging.info("Logged out")
+                logger.info("Logged out")
+            except httpx.HTTPStatusError:
+                if logout.status_code == 404:
+                    logger.warning("Logout endpoint not found, skipping logout.")
+                else:
+                    logger.error(f"Logout failed: ({logout.status_code}) {logout.text}")
+            except httpx.HTTPConnectError:
+                logger.warning("Logout endpoint not reachable, skipping logout.")
         self.username = None
         self.password = None
         self._okapi_token = None
         if self.httpx_client and not self.httpx_client.is_closed:
             self.httpx_client.close()
         self.is_closed = True
+
+    @property
+    def okapi_url(self):
+        """
+        Convenience property for backwards-compatibility with tools built for
+        pre-Sunflower FOLIO systems.
+        """
+        warn(
+            "FolioClient.okapi_url is deprecated. Use gateway_url instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.gateway_url
+
+    @okapi_url.setter
+    def okapi_url(self, value):
+        """
+        Setter for okapi_url property, to maintain backwards compatibility.
+        """
+        warn(
+            "FolioClient.okapi_url is deprecated. Use gateway_url instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.gateway_url = value
 
     def close(self):
         self.__exit__(None, None, None)
@@ -92,31 +185,31 @@ class FolioClient:
         self.tenant_id is always used as x-okapi-tenant header, and is reset to any existing value
         after the call.
         """
-        logging.info("fetching current user..")
+        logger.info("fetching current user..")
         current_tenant_id = self.okapi_headers["x-okapi-tenant"]
         self.okapi_headers["x-okapi-tenant"] = self.tenant_id
         try:
             path = f"/bl-users/by-username/{self.username}"
-            resp = self.folio_get(path, "user")
+            resp = self._folio_get(path, "user")
             self.okapi_headers["x-okapi-tenant"] = current_tenant_id
             return resp["id"]
         except httpx.HTTPStatusError:
-            logging.info("bl-users endpoint not found, trying /users endpoint instead.")
+            logger.info("bl-users endpoint not found, trying /users endpoint instead.")
             try:
                 path = "/users"
                 query = f"username=={self.username}"
-                resp = self.folio_get(path, "users", query=query)
+                resp = self._folio_get(path, "users", query=query)
                 self.okapi_headers["x-okapi-tenant"] = current_tenant_id
                 return resp[0]["id"]
             except Exception as exception:
-                logging.error(
+                logger.error(
                     f"Unable to fetch user id for user {self.username}",
                     exc_info=exception,
                 )
                 self.okapi_headers["x-okapi-tenant"] = current_tenant_id
                 return ""
         except Exception as exception:
-            logging.error(f"Unable to fetch user id for user {self.username}", exc_info=exception)
+            logger.error(f"Unable to fetch user id for user {self.username}", exc_info=exception)
             self.okapi_headers["x-okapi-tenant"] = current_tenant_id
             return ""
 
@@ -222,7 +315,9 @@ class FolioClient:
 
     @cached_property
     def call_number_types(self):
-        return list(self.folio_get_all("/call-number-types", "callNumberTypes", self.cql_all, 1000))
+        return list(
+            self.folio_get_all("/call-number-types", "callNumberTypes", self.cql_all, 1000)
+        )
 
     @cached_property
     def holdings_types(self):
@@ -298,39 +393,96 @@ class FolioClient:
         else:
             raise FolioClientClosed()
 
+    @property
+    def cookies(self) -> CookieTypes:
+        """
+        Property that returns the cookies for the current session, and
+        refreshes them if needed.
+        """
+        if not self.is_closed:
+            if self._cookies is None or datetime.now(tz.utc) > (
+                self.okapi_token_expires
+                - timedelta(
+                    seconds=self.okapi_token_duration.total_seconds()
+                    * self.okapi_token_time_remaining_threshold
+                )
+            ):
+                self.login()
+            return self._cookies
+        else:
+            raise FolioClientClosed()
+
+    @property
+    def is_ecs(self):
+        """
+        Property that returns True if self.tenant_id is an ECS central tenant.
+        """
+        return bool(self.ecs_consortium)
+
+    @cached_property
+    def ecs_consortium(self) -> Union[Dict[str, Any], None]:
+        """
+        Property that returns the consortia for the current tenant.
+        """
+        current_tenant_id = self.okapi_headers["x-okapi-tenant"]
+        try:
+            self.okapi_headers["x-okapi-tenant"] = self.tenant_id
+            consortium = self.folio_get("/consortia", "consortia")[0]
+        except (httpx.HTTPStatusError, IndexError):
+            consortium = None
+        finally:
+            self.okapi_headers["x-okapi-tenant"] = current_tenant_id
+        return consortium
+
+    @cached_property
+    def ecs_members(self) -> List[Dict[str, Any]]:
+        """
+        Property that returns the tenants of the consortia
+        """
+        if self.is_ecs:
+            tenants = self.folio_get(
+                f"/consortia/{self.consortia['id']}/tenants",
+                "tenants",
+                query_params={"limit": 1000},
+            )
+            tenants.sort(key=lambda x: x["id"])
+            return tenants
+        else:
+            return []
+
     @folio_retry_on_server_error
+    @handle_remote_protocol_error
+    @use_client_session
     def login(self):
         """Logs into FOLIO in order to get the folio access token."""
         if not self.is_closed:
             payload = {"username": self.username, "password": self.password}
             # Transitional implementation to support Poppy and pre-Poppy authentication
-            url = urljoin(self.okapi_url, "authn/login-with-expiry")
+            url = urljoin(self.gateway_url, "authn/login-with-expiry")
             # Poppy and later
             try:
-                req = httpx.post(
+                req = self.httpx_client.post(
                     url,
                     json=payload,
                     headers=self.base_headers,
-                    timeout=HTTPX_TIMEOUT,
-                    verify=self.ssl_verify,
+                    timeout=self.http_timeout,
                 )
                 req.raise_for_status()
             except httpx.HTTPStatusError:
                 # Pre-Poppy
                 if req.status_code == 404:
-                    url = urljoin(self.okapi_url, "authn/login")
-                    req = httpx.post(
+                    url = urljoin(self.gateway_url, "authn/login")
+                    req = self.httpx_client.post(
                         url,
                         json=payload,
                         headers=self.base_headers,
-                        timeout=HTTPX_TIMEOUT,
-                        verify=self.ssl_verify,
+                        timeout=self.http_timeout,
                     )
                     req.raise_for_status()
                 else:
                     raise
             response_body = req.json()
-            self.cookies = req.cookies
+            self._cookies = req.cookies
             self._okapi_token = req.headers.get("x-okapi-token") or req.cookies.get(
                 "folioAccessToken"
             )
@@ -351,97 +503,101 @@ class FolioClient:
     def get_single_instance(self, instance_id):
         return self.folio_get_single_object(f"inventory/instances/{instance_id}")
 
+    @use_client_session_with_generator
     def folio_get_all(self, path, key=None, query=None, limit=10, **kwargs):
         """
-         Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
+        Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
         an iterable object yielding a single record at a time until all records have been returned.
-        :param query: The query string to filter the data objects.
-        :param limit: The maximum number of records to fetch in each chunk.
-        :param kwargs: Additional url parameters to pass to `path`.
-        :return: An iterable object yielding a single record at a time.
+
+        Parameters:
+            path (str): The API endpoint path.
+            key (str): The key in the JSON response that contains the array of results.
+            query (str): The query string to filter the data objects.
+            limit (int): The maximum number of records to fetch in each chunk.
+            **kwargs: Additional URL parameters to pass to `path`.
         """
-        with httpx.Client(timeout=HTTPX_TIMEOUT, verify=self.ssl_verify) as httpx_client:
-            self.httpx_client = httpx_client
-            offset = 0
-            query = query or " ".join((self.cql_all, "sortBy id"))
-            query_params: Dict[str, Any] = self._construct_query_parameters(
-                query=query, limit=limit, offset=offset * limit, **kwargs
-            )
-            temp_res = self.folio_get(path, key, query_params=query_params)
-            yield from temp_res
-            while len(temp_res) == limit:
-                offset += 1
-                temp_res = self.folio_get(
-                    path,
-                    key,
-                    query_params=self._construct_query_parameters(
-                        query=query, limit=limit, offset=offset * limit, **kwargs
-                    ),
-                )
-                yield from temp_res
+        offset = 0
+        query = query or " ".join((self.cql_all, "sortBy id"))
+        query_params: Dict[str, Any] = self._construct_query_parameters(
+            query=query, limit=limit, offset=offset * limit, **kwargs
+        )
+        temp_res = self.folio_get(path, key, query_params=query_params)
+        yield from temp_res
+        while len(temp_res) == limit:
             offset += 1
-            yield from self.folio_get(
+            temp_res = self.folio_get(
                 path,
                 key,
                 query_params=self._construct_query_parameters(
                     query=query, limit=limit, offset=offset * limit, **kwargs
                 ),
             )
+            yield from temp_res
+        offset += 1
+        yield from self.folio_get(
+            path,
+            key,
+            query_params=self._construct_query_parameters(
+                query=query, limit=limit, offset=offset * limit, **kwargs
+            ),
+        )
 
+    @use_client_session_with_generator
     def folio_get_all_by_id_offset(self, path, key=None, query=None, limit=10, **kwargs):
         """
         Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
         an iterable object yielding a single record at a time until all records have been returned.
-        :param query: The query string to filter the data objects.
-        :param limit: The maximum number of records to fetch in each chunk.
-        :param kwargs: Additional url parameters to pass to `path`.
-        :return: An iterable object yielding a single record at a time.
+
+        Parameters:
+            path (str): The API endpoint path.
+            key (str): The key in the JSON response that contains the array of results.
+            query (str): The query string to filter the data objects.
+            limit (int): The maximum number of records to fetch in each chunk.
+            **kwargs: Additional URL parameters to pass to `path`.
         """
-        with httpx.Client(timeout=HTTPX_TIMEOUT, verify=self.ssl_verify) as httpx_client:
-            self.httpx_client = httpx_client
-            offset = None
-            if not query:
-                query = "cql.allRecords=1 sortBy id"
-            if "sortBy id" not in query:
-                raise ValueError("FOLIO query must be sorted by ID")
-            query = query or " ".join((self.cql_all, "sortBy id"))
-            query_params: Dict[str, Any] = self._construct_query_parameters(
-                query=query, limit=limit, **kwargs
+        offset = None
+        if not query:
+            query = "cql.allRecords=1 sortBy id"
+        if "sortBy id" not in query:
+            raise ValueError("FOLIO query must be sorted by ID")
+        query = query or " ".join((self.cql_all, "sortBy id"))
+        query_params: Dict[str, Any] = self._construct_query_parameters(
+            query=query, limit=limit, **kwargs
+        )
+        temp_res = self.folio_get(path, key, query_params=query_params)
+        try:
+            offset = temp_res[-1]["id"]
+        except IndexError:
+            yield from temp_res
+            return
+        yield from temp_res
+        while len(temp_res) == limit:
+            query_params = self._construct_query_parameters(query=query, limit=limit, **kwargs)
+            query_params["query"] = f'id>"{offset}" and ' + query_params["query"]
+            temp_res = self.folio_get(
+                path,
+                key,
+                query_params=query_params,
             )
-            temp_res = self.folio_get(path, key, query_params=query_params)
             try:
                 offset = temp_res[-1]["id"]
             except IndexError:
                 yield from temp_res
                 return
             yield from temp_res
-            while len(temp_res) == limit:
-                query_params = self._construct_query_parameters(query=query, limit=limit, **kwargs)
-                query_params["query"] = f'id>"{offset}" and ' + query_params["query"]
-                temp_res = self.folio_get(
-                    path,
-                    key,
-                    query_params=query_params,
-                )
-                try:
-                    offset = temp_res[-1]["id"]
-                except IndexError:
-                    yield from temp_res
-                    return
-                yield from temp_res
-            query_params = self._construct_query_parameters(query=query, limit=limit, **kwargs)
-            query_params["query"] = f'id>"{offset}" and ' + query_params["query"]
-            yield from self.folio_get(
-                path,
-                key,
-                query_params=query_params,
-            )
+        query_params = self._construct_query_parameters(query=query, limit=limit, **kwargs)
+        query_params["query"] = f'id>"{offset}" and ' + query_params["query"]
+        yield from self.folio_get(
+            path,
+            key,
+            query_params=query_params,
+        )
 
     def _construct_query_parameters(self, **kwargs) -> Dict[str, Any]:
         """Private method to construct query parameters for folio_get or httpx client calls
 
-        :param kwargs: Additional keyword arguments.
-        :return: A dictionary of query parameters.
+        Parameters:
+            **kwargs: URL parameters to pass to `path`.
         """
         params = kwargs
         if query := kwargs.get("query"):
@@ -460,13 +616,22 @@ class FolioClient:
     def folio_get(self, path, key=None, query="", query_params: dict = None):
         """
         Fetches data from FOLIO and turns it into a json object
-        * path: FOLIO API endpoint path
-        * key: Key in JSON response from FOLIO that includes the array of results for query APIs
-        * query: For backwards-compatibility
-        * query_params: Additional query parameters for the specified path. May also be used for
+        Parameters:
+        path: FOLIO API endpoint path
+        key: Key in JSON response from FOLIO that includes the array of results for query APIs
+        query: For backwards-compatibility
+        query_params: Additional query parameters for the specified path. May also be used for
                 `query`
         """
-        url = urljoin(self.okapi_url, path.lstrip("/")).rstrip("/")
+        return self._folio_get(path, key, query, query_params=query_params)
+
+    @handle_remote_protocol_error
+    @use_client_session
+    def _folio_get(self, path, key=None, query="", query_params: dict = None):
+        """
+        Private method that implements `folio_get`
+        """
+        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
         if query and query_params:
             query_params = self._construct_query_parameters(query=query, **query_params)
         elif query:
@@ -479,49 +644,82 @@ class FolioClient:
                 url,
                 params=query_params,
                 headers=self.okapi_headers,
-                timeout=HTTPX_TIMEOUT,
+                timeout=self.http_timeout,
                 verify=self.ssl_verify,
             )
             req.raise_for_status()
         return req.json()[key] if key else req.json()
 
     @folio_retry_on_auth_error
+    @handle_remote_protocol_error
+    @use_client_session
     def folio_put(self, path, payload, query_params: dict = None):
         """Convenience method to update data in FOLIO"""
-        url = urljoin(self.okapi_url, path.lstrip("/")).rstrip("/")
-        with self.get_folio_http_client() as httpx_client:
-            req = httpx_client.put(
-                url,
-                headers=self.okapi_headers,
-                json=payload,
-                params=query_params,
-            )
-            req.raise_for_status()
-            try:
-                return req.json()
-            except json.JSONDecodeError:
-                return None
+        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+        req = self.httpx_client.put(
+            url,
+            headers=self.okapi_headers,
+            json=payload,
+            params=query_params,
+        )
+        req.raise_for_status()
+        try:
+            return req.json()
+        except json.JSONDecodeError:
+            return None
 
     @folio_retry_on_auth_error
+    @handle_remote_protocol_error
+    @use_client_session
     def folio_post(self, path, payload, query_params: dict = None):
         """Convenience method to post data to FOLIO"""
-        url = urljoin(self.okapi_url, path.lstrip("/")).rstrip("/")
-        with self.get_folio_http_client() as httpx_client:
-            req = httpx_client.post(
-                url,
-                headers=self.okapi_headers,
-                json=payload,
-                params=query_params,
-            )
+        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+        req = self.httpx_client.post(
+            url,
+            headers=self.okapi_headers,
+            json=payload,
+            params=query_params,
+        )
+        req.raise_for_status()
+        try:
+            return req.json()
+        except json.JSONDecodeError:
+            return None
+
+    @folio_retry_on_auth_error
+    @handle_remote_protocol_error
+    @use_client_session
+    def folio_delete(self, path, query_params: dict = None):
+        """Convenience method to delete data in FOLIO"""
+        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+        req = self.httpx_client.delete(
+            url,
+            headers=self.okapi_headers,
+            params=query_params,
+        )
+        try:
             req.raise_for_status()
-            try:
-                return req.json()
-            except json.JSONDecodeError:
+        except httpx.HTTPStatusError:
+            if req.status_code == 404:
+                logger.warning(f"Resource not found: {path}")
+            else:
+                raise
+        try:
+            return req.json()
+        except json.JSONDecodeError:
+            # If the response is successful + empty, return None
+            if req.status_code == 204:
+                logger.info(f"Resource deleted: {path} ({req.status_code})")
                 return None
+            else:
+                logger.error(f"Failed to decode JSON response: {req.text}")
+                raise
 
     def get_folio_http_client(self):
         """Returns a httpx client for use in FOLIO communication"""
-        return httpx.Client(timeout=HTTPX_TIMEOUT, verify=self.ssl_verify, base_url=self.okapi_url)
+        return httpx.Client(
+            timeout=self.http_timeout, verify=self.ssl_verify, base_url=self.gateway_url
+        )
 
     def folio_get_single_object(self, path):
         """Fetches data from FOLIO and turns it into a json object as is"""
@@ -558,7 +756,7 @@ class FolioClient:
             "User-Agent": USER_AGENT_STRING,
         }
         if os.environ.get("GITHUB_TOKEN"):
-            logging.info("Using GITHB_TOKEN environment variable for Gihub API Access")
+            logger.info("Using GITHB_TOKEN environment variable for Gihub API Access")
             github_headers["authorization"] = f"token {os.environ.get('GITHUB_TOKEN')}"
         return github_headers
 
@@ -594,7 +792,7 @@ class FolioClient:
             req = httpx.get(
                 f_path,
                 headers=FolioClient.get_github_request_headers(),
-                timeout=HTTPX_TIMEOUT,
+                timeout=self.http_timeout,
                 follow_redirects=True,
                 verify=ssl_verify,
             )
@@ -738,7 +936,7 @@ class FolioClient:
 
     def put_user(self, user):
         """Fetches data from FOLIO and turns it into a json object as is"""
-        url = urljoin(self.okapi_url, f"users/{user['id']}")
+        url = urljoin(self.gateway_url, f"users/{user['id']}")
         print(url)
         req = httpx.put(url, headers=self.okapi_headers, json=user, verify=self.ssl_verify)
         print(f"{req.status_code}")
@@ -757,8 +955,6 @@ def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_lo
 
 
 def validate_uuid(my_uuid):
-    reg = (
-        "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"  # noqa
-    )
+    reg = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"  # noqa
     pattern = re.compile(reg)
     return bool(pattern.match(my_uuid))
