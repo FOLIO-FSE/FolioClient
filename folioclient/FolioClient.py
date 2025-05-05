@@ -422,7 +422,7 @@ class FolioClient:
     @cached_property
     def ecs_consortium(self) -> Union[Dict[str, Any], None]:
         """
-        Property that returns the consortia for the current tenant.
+        Property that returns the ECS consortia for the current tenant.
         """
         current_tenant_id = self.okapi_headers["x-okapi-tenant"]
         try:
@@ -437,7 +437,7 @@ class FolioClient:
     @cached_property
     def ecs_members(self) -> List[Dict[str, Any]]:
         """
-        Property that returns the tenants of the consortia
+        Property that returns the tenants of the ECS consortia.
         """
         if self.is_ecs:
             tenants = self.folio_get(
