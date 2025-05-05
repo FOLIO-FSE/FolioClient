@@ -441,7 +441,7 @@ class FolioClient:
         """
         if self.is_ecs:
             tenants = self.folio_get(
-                f"/consortia/{self.consortia['id']}/tenants",
+                f"/consortia/{self.ecs_consortium['id']}/tenants",
                 "tenants",
                 query_params={"limit": 1000},
             )
