@@ -108,5 +108,9 @@ venv.bak/
 # poetry
 poetry.lock
 
+# uv
+*.lock
+pylock.toml
+
 # Sandbox files
 scratch_pad.ipynb
