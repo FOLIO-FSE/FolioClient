@@ -75,14 +75,14 @@ class FolioClient:
         password (str): The password for authentication.
         ssl_verify (bool): Whether to verify SSL certificates. Default is True.
         okapi_url (keyword-only, str, optional): Deprecated. Use gateway_url instead.
-    """
+    """ # noqa: E501
 
     def __init__(
         self, gateway_url, tenant_id, username, password, ssl_verify=True, *, okapi_url=None
     ):
         if okapi_url:
             warn(
-                "okapi_url argument is deprecated. Use gateway_url instead. Support for okapi_url will be removed in a future release.",
+                "okapi_url argument is deprecated. Use gateway_url instead. Support for okapi_url will be removed in a future release.", # noqa: E501
                 DeprecationWarning,
                 stacklevel=2,
             )
