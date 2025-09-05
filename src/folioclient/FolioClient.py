@@ -30,6 +30,8 @@ from folioclient.exceptions import FolioClientClosed
 # Constants
 CONTENT_TYPE_JSON = "application/json"
 
+SORTBY_ID = "sortBy id"
+
 try:
     HTTPX_TIMEOUT = int(os.environ.get("FOLIOCLIENT_HTTP_TIMEOUT"))
 except TypeError:
@@ -517,7 +519,7 @@ class FolioClient:
             **kwargs: Additional URL parameters to pass to `path`.
         """
         offset = 0
-        query = query or " ".join((self.cql_all, "sortBy id"))
+        query = query or " ".join((self.cql_all, SORTBY_ID))
         query_params: Dict[str, Any] = self._construct_query_parameters(
             query=query, limit=limit, offset=offset * limit, **kwargs
         )
@@ -557,10 +559,10 @@ class FolioClient:
         """
         offset = None
         if not query:
-            query = "cql.allRecords=1 sortBy id"
-        if "sortBy id" not in query:
+            query = "cql.allRecords=1 " + SORTBY_ID
+        if SORTBY_ID not in query:
             raise ValueError("FOLIO query must be sorted by ID")
-        query = query or " ".join((self.cql_all, "sortBy id"))
+        query = query or " ".join((self.cql_all, SORTBY_ID))
         query_params: Dict[str, Any] = self._construct_query_parameters(
             query=query, limit=limit, **kwargs
         )
