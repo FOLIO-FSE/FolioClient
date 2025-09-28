@@ -17,6 +17,7 @@ from httpx._types import CookieTypes
 from dateutil.parser import parse as date_parse
 from openapi_schema_to_json_schema import to_json_schema
 
+from folioclient._httpx import FolioAuth, FolioConnectionParameters
 from folioclient.cached_property import cached_property
 from folioclient.decorators import (
     folio_retry_on_auth_error,
@@ -43,6 +44,47 @@ USER_AGENT_STRING = "Folio Client (https://github.com/FOLIO-FSE/FolioClient)"
 
 # Set up logger
 logger = logging.getLogger("FolioClient")
+
+
+class FolioHeadersDict(dict):
+    """Custom dict wrapper for folio_headers that intercepts x-okapi-tenant assignments"""
+
+    def __init__(self, folio_client: "FolioClient", *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._folio_client = folio_client
+
+    def __setitem__(self, key, value):
+        if key == "x-okapi-tenant":
+            warn(
+                "Setting x-okapi-tenant via headers is deprecated. "
+                "Use folio_client.tenant_id = 'your_tenant' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Update tenant through the auth system
+            self._folio_client.tenant_id = value
+            # Don't store in the dict since it's added automatically
+            return
+
+        # For all other headers, store normally
+        super().__setitem__(key, value)
+
+    def update(self, other):
+        """Override update to handle x-okapi-tenant specially"""
+        if isinstance(other, dict) and "x-okapi-tenant" in other:
+            # Handle x-okapi-tenant specially
+            tenant_id = other["x-okapi-tenant"]  # Read-only access
+            warn(
+                "Setting x-okapi-tenant via okapi_headers is deprecated. "
+                "Use folio_client.tenant_id = 'your_tenant' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self._folio_client.tenant_id = tenant_id
+            other = {k: v for k, v in other.items() if k != "x-okapi-tenant"}
+
+        # Update with remaining headers
+        super().update(other)
 
 
 class FolioClient:
@@ -77,40 +119,51 @@ class FolioClient:
         password (str): The password for authentication.
         ssl_verify (bool): Whether to verify SSL certificates. Default is True.
         okapi_url (keyword-only, str, optional): Deprecated. Use gateway_url instead.
-    """ # noqa: E501
+    """  # noqa: E501
 
     def __init__(
-        self, gateway_url, tenant_id, username, password, ssl_verify=True, *, okapi_url=None
+        self, gateway_url, tenant_id, username, password, *, ssl_verify=True, okapi_url=None
     ):
         if okapi_url:
             warn(
-                "okapi_url argument is deprecated. Use gateway_url instead. Support for okapi_url will be removed in a future release.", # noqa: E501
+                "okapi_url argument is deprecated. Use gateway_url instead. Support for okapi_url will be removed in a future release.",  # noqa: E501
                 DeprecationWarning,
                 stacklevel=2,
             )
-        self.http_timeout = HTTPX_TIMEOUT
+        if not ssl_verify:
+            warn(
+                "ssl_verify argument is deprecated. It will be removed in a future release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.missing_location_codes = set()
         self.loan_policies = {}
         self.cql_all = "?query=cql.allRecords=1"
-        self.gateway_url = okapi_url or gateway_url
-        self.tenant_id = tenant_id
-        self.username = username
-        self.password = password
-        self.ssl_verify = ssl_verify
+        self.folio_parameters: FolioConnectionParameters = FolioConnectionParameters(
+            gateway_url=okapi_url or gateway_url,
+            tenant_id=tenant_id,
+            username=username,
+            password=password,
+            ssl_verify=ssl_verify,
+            timeout=HTTPX_TIMEOUT,
+        )
+        self.folio_auth: FolioAuth = FolioAuth(self.folio_parameters)
         self.httpx_client = None
-        self.refresh_token = None
-        self.okapi_token_expires = None
-        self.okapi_token_duration = None
         self.okapi_token_time_remaining_threshold = float(
             os.environ.get("FOLIOCLIENT_REFRESH_API_TOKEN_TIME_REMAINING", ".2")
         )
         self.base_headers = {
-            "x-okapi-tenant": self.tenant_id,
             "content-type": CONTENT_TYPE_JSON,
         }
-        self._okapi_headers = {}
+        self._folio_headers = FolioHeadersDict(self)
         self.is_closed = False
         self.login()
+        if self.is_ecs:
+            logger.info(
+                f"Connected to ECS central tenant {self.tenant_id}"
+                f" ({self.ecs_consortium.get('name', 'unknown')})"
+            )
+            self.ecs_central_tenant_id = self.tenant_id
 
     def __repr__(self) -> str:
         return f"FolioClient for tenant {self.tenant_id} at {self.gateway_url} as {self.username}"
@@ -118,9 +171,10 @@ class FolioClient:
     def __enter__(self):
         """Context manager for FolioClient"""
         self.httpx_client = httpx.Client(
-            timeout=self.http_timeout,
-            verify=self.ssl_verify,
-            base_url=self.gateway_url,
+            timeout=self.folio_parameters.timeout,
+            verify=self.folio_parameters.ssl_verify,
+            base_url=self.folio_parameters.gateway_url,
+            auth=self.folio_auth,
         )
         return self
 
@@ -128,12 +182,11 @@ class FolioClient:
     @use_client_session
     def __exit__(self, exc_type, exc_value, traceback):
         """Context manager exit method"""
+        self.is_closed = True
         if self.cookies:
             logger.info("logging out...")
             logout = self.httpx_client.post(
                 urljoin(self.gateway_url, "authn/logout"),
-                headers=self.base_headers,
-                cookies=self.cookies,
             )
             try:
                 logout.raise_for_status()
@@ -145,12 +198,12 @@ class FolioClient:
                     logger.error(f"Logout failed: ({logout.status_code}) {logout.text}")
             except httpx.HTTPConnectError:
                 logger.warning("Logout endpoint not reachable, skipping logout.")
-        self.username = None
-        self.password = None
-        self._okapi_token = None
-        if self.httpx_client and not self.httpx_client.is_closed:
+        if hasattr(self, "httpx_client") and self.httpx_client and not self.httpx_client.is_closed:
             self.httpx_client.close()
-        self.is_closed = True
+        self.folio_parameters = None
+        if hasattr(self, "folio_auth"):
+            self.folio_auth._token = None
+            self.folio_auth._params = None
 
     @property
     def okapi_url(self):
@@ -166,7 +219,7 @@ class FolioClient:
         return self.gateway_url
 
     @okapi_url.setter
-    def okapi_url(self, value):
+    def okapi_url(self, okapi_url):
         """
         Setter for okapi_url property, to maintain backwards compatibility.
         """
@@ -175,10 +228,85 @@ class FolioClient:
             DeprecationWarning,
             stacklevel=2,
         )
-        self.gateway_url = value
+        self.gateway_url = okapi_url
 
     def close(self):
         self.__exit__(None, None, None)
+
+    @property
+    def tenant_id(self):
+        return self.folio_auth.tenant_id
+
+    @tenant_id.setter
+    def tenant_id(self, tenant_id):
+        if self.is_ecs:
+            tenant_map = {t["id"]: t["name"] for t in self.ecs_members}
+            logger.info(
+                f"Setting active tenant to {tenant_id} ({tenant_map.get(tenant_id, 'unknown')})"
+            )  # noqa: E501
+        else:
+            logger.info(f"Setting active tenant to {tenant_id}")
+        self.folio_auth.tenant_id = tenant_id
+        self._clear_cached_properties()
+
+    @tenant_id.deleter
+    def tenant_id(self):
+        self.folio_auth.reset_tenant_id()
+        self._clear_cached_properties()
+
+    @property
+    def username(self):
+        return self.folio_parameters.username
+
+    @property
+    def password(self):
+        return self.folio_parameters.password
+
+    @property
+    def initial_tenant_id(self):
+        return self.folio_parameters.tenant_id
+
+    @property
+    def gateway_url(self):
+        return self.folio_parameters.gateway_url
+
+    @property
+    def ssl_verify(self):
+        return self.folio_parameters.ssl_verify
+
+    @property
+    def http_timeout(self):
+        return self.folio_parameters.timeout
+
+    def _clear_cached_properties(self, *property_names):
+        """Clear cached properties specified or all cached properties if none are specified."""
+
+        # Get the properties to clear
+        if property_names:
+            props_to_clear = property_names
+        else:
+            props_to_clear = [
+                attr_name
+                for attr_name in dir(self.__class__)
+                if not attr_name.startswith("_") and self._is_cached_property(attr_name)
+            ]
+        # Clear each property
+        for prop_name in props_to_clear:
+            self._clear_single_cached_property(prop_name)
+
+    def _is_cached_property(self, attr_name):
+        """Check if an attribute is a cached_property"""
+        try:
+            attr = getattr(self.__class__, attr_name)
+            return isinstance(attr, cached_property)
+        except AttributeError:
+            return False
+
+    def _clear_single_cached_property(self, prop_name):
+        """Clear a single cached property if it exists"""
+        cached_attr_name = f"_{prop_name}"
+        if hasattr(self, cached_attr_name):
+            delattr(self, cached_attr_name)
 
     @cached_property
     def current_user(self):
@@ -188,32 +316,36 @@ class FolioClient:
         after the call.
         """
         logger.info("fetching current user..")
-        current_tenant_id = self.okapi_headers["x-okapi-tenant"]
-        self.okapi_headers["x-okapi-tenant"] = self.tenant_id
+        current_tenant_id = self.tenant_id
+        self.folio_auth.reset_tenant_id()
+
         try:
-            path = f"/bl-users/by-username/{self.username}"
+            # Try bl-users endpoint first
+            path = f"/bl-users/by-username/{self.folio_parameters.username}"
             resp = self._folio_get(path, "user")
-            self.okapi_headers["x-okapi-tenant"] = current_tenant_id
             return resp["id"]
         except httpx.HTTPStatusError:
             logger.info("bl-users endpoint not found, trying /users endpoint instead.")
             try:
+                # Fallback to users endpoint
                 path = "/users"
-                query = f"username=={self.username}"
+                query = f"username=={self.folio_parameters.username}"
                 resp = self._folio_get(path, "users", query=query)
-                self.okapi_headers["x-okapi-tenant"] = current_tenant_id
                 return resp[0]["id"]
             except Exception as exception:
                 logger.error(
-                    f"Unable to fetch user id for user {self.username}",
+                    f"Unable to fetch user id for user {self.folio_parameters.username}",
                     exc_info=exception,
                 )
-                self.okapi_headers["x-okapi-tenant"] = current_tenant_id
                 return ""
         except Exception as exception:
-            logger.error(f"Unable to fetch user id for user {self.username}", exc_info=exception)
-            self.okapi_headers["x-okapi-tenant"] = current_tenant_id
+            logger.error(
+                f"Unable to fetch user id for user {self.folio_parameters.username}",
+                exc_info=exception,
+            )
             return ""
+        finally:
+            self.tenant_id = current_tenant_id
 
     @cached_property
     def identifier_types(self):
@@ -344,38 +476,144 @@ class FolioClient:
         return list(self.folio_get_all("/subject-types", "subjectTypes", self.cql_all, 1000))
 
     @property
-    def okapi_headers(self):
+    def folio_headers(self) -> Dict[str, str]:
         """
-        Property that returns okapi headers with the current valid Okapi token. All headers except
-        x-okapi-token can be modified by key-value assignment. If a new x-okapi-token value is set
-        via this method, it will be overwritten with the current, valid okapi token value returned
-        by self.okapi_token. To reset all header values to their initial state:
+        Convenience property that returns FOLIO headers with the current valid auth token.
 
-        >>>> del folio_client.okapi_headers
+        **INTENDED FOR EXTERNAL USE ONLY**
+        This property is designed for users who want to use their own HTTP libraries
+        (requests, aiohttp, etc.) while leveraging FolioClient's token management.
+
+        FolioClient's own methods (folio_get, folio_post, etc.) do NOT use this
+        property - they use the FolioAuth authentication flow directly.
+
+        All headers except x-okapi-token can be modified by:
+        - Bulk assignment: folio_client.folio_headers = {...}
+        - Key assignment: folio_client.folio_headers['key'] = 'value'
+        - Update method: folio_client.folio_headers.update({...})
+
+        Example:
+            >>> import requests
+            >>> with FolioClient(...) as client:
+            ...     headers = client.folio_headers
+            ...     response = requests.get(url, headers=headers)
 
         Returns:
-            dict: The okapi headers.
+            FolioHeadersDict: The FOLIO headers with special x-okapi-tenant handling.
         """
+        if self.is_closed:
+            raise FolioClientClosed()
+
         headers = {
             "x-okapi-token": self.okapi_token,
         }
-        if self._okapi_headers:
-            self._okapi_headers.update(headers)
+        if self._folio_headers:
+            self._folio_headers.update(headers)
         else:
-            self._okapi_headers.update(self.base_headers)
-            self._okapi_headers.update(headers)
-        return self._okapi_headers
+            self._folio_headers = FolioHeadersDict(self)
+            self._folio_headers.update(self.base_headers)
+            self._folio_headers.update(headers)
+        return self._folio_headers
 
-    @okapi_headers.deleter
-    def okapi_headers(self):
+    @folio_headers.setter
+    def folio_headers(self, headers_dict: Dict[str, str]) -> None:
         """
-        Deleter for okapi_headers that clears the private _okapi_headers dictionary, which will
-        revert okapi_headers to using base_headers
+        Setter for folio_headers that allows setting custom headers while preserving
+        backward compatibility for x-okapi-tenant.
+
+        Parameters:
+            headers_dict (Dict[str, str]): Dictionary of headers to set
         """
-        self._okapi_headers.clear()
+        if self.is_closed:
+            raise FolioClientClosed()
+
+        new_headers = FolioHeadersDict(self)
+        new_headers.update(headers_dict)
+        self._folio_headers = new_headers
+
+    @folio_headers.deleter
+    def folio_headers(self) -> None:
+        """
+        Deleter for folio_headers that clears the private _folio_headers dictionary, which will
+        revert folio_headers to using base_headers
+        """
+        if self.is_closed:
+            raise FolioClientClosed()
+
+        self._folio_headers.clear()
 
     @property
-    def okapi_token(self):
+    def okapi_headers(self) -> Dict[str, str]:
+        """
+        Property that returns okapi headers with the current valid Okapi token.
+
+        .. deprecated::
+           Use :attr:`folio_headers` instead. This property will be removed in a future release.
+
+        **INTENDED FOR EXTERNAL USE ONLY**
+        This property is designed for users who want to use their own HTTP libraries
+        (requests, aiohttp, etc.) while leveraging FolioClient's token management.
+
+        All headers except x-okapi-token can be modified by:
+        - Bulk assignment: folio_client.okapi_headers = {...}
+        - Key assignment: folio_client.okapi_headers['key'] = 'value'
+        - Update method: folio_client.okapi_headers.update({...})
+
+        Example:
+            >>> import requests
+            >>> with FolioClient(...) as client:
+            ...     headers = client.okapi_headers  # Deprecated - use folio_headers
+            ...     response = requests.get(url, headers=headers)
+
+        Returns:
+            FolioHeadersDict: The okapi headers with special x-okapi-tenant handling.
+        """
+        warn(
+            "FolioClient.okapi_headers is deprecated. Use folio_headers instead. "
+            "Support for okapi_headers will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.folio_headers
+
+    @okapi_headers.setter
+    def okapi_headers(self, headers_dict: Dict[str, str]) -> None:
+        """
+        Setter for okapi_headers that allows setting custom headers while preserving
+        backward compatibility for x-okapi-tenant.
+
+        .. deprecated::
+           Use :attr:`folio_headers` instead. This property will be removed in a future release.
+
+        Parameters:
+            headers_dict (Dict[str, str]): Dictionary of headers to set
+        """
+        warn(
+            "FolioClient.okapi_headers is deprecated. Use folio_headers instead. "
+            "Support for okapi_headers will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.folio_headers = headers_dict
+
+    @okapi_headers.deleter
+    def okapi_headers(self) -> None:
+        """
+        Deleter for okapi_headers that clears the private _okapi_headers dictionary.
+
+        .. deprecated::
+           Use :attr:`folio_headers` instead. This property will be removed in a future release.
+        """
+        warn(
+            "FolioClient.okapi_headers is deprecated. Use folio_headers instead. "
+            "Support for okapi_headers will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        del self.folio_headers
+
+    @property
+    def okapi_token(self) -> str:
         """
         Property that attempts to return a valid Okapi token, refreshing if needed.
 
@@ -383,39 +621,76 @@ class FolioClient:
             str: The Okapi token.
         """
         if not self.is_closed:
-            if datetime.now(tz.utc) > (
-                self.okapi_token_expires
-                - timedelta(
-                    seconds=self.okapi_token_duration.total_seconds()
-                    * self.okapi_token_time_remaining_threshold
-                )
-            ):
-                self.login()
-            return self._okapi_token
+            return self.folio_auth.folio_auth_token
         else:
             raise FolioClientClosed()
+
+    @property
+    def refresh_token(self) -> str:
+        if self.is_closed:
+            raise FolioClientClosed()
+        else:
+            _ = self.okapi_token  # Ensure token is valid
+            return self.folio_auth._token.refresh_token
 
     @property
     def cookies(self) -> CookieTypes:
         """
         Property that returns the cookies for the current session, and
-        refreshes them if needed.
+        refreshes them if needed. Raises FolioClientClosed if the client is closed.
         """
-        if not self.is_closed:
-            if self._cookies is None or datetime.now(tz.utc) > (
-                self.okapi_token_expires
-                - timedelta(
-                    seconds=self.okapi_token_duration.total_seconds()
-                    * self.okapi_token_time_remaining_threshold
-                )
-            ):
-                self.login()
-            return self._cookies
+        if not self.is_closed and self.folio_auth._token:
+            _ = self.okapi_token  # Ensure token is valid
+            return self.folio_auth._token.cookies
         else:
             raise FolioClientClosed()
 
+    def set_central_tenant(self, tenant_id):
+        """
+        Method to set self.tenant_id to an ECS central tenant.
+        """
+        self.ecs_central_tenant_id = tenant_id
+        self._clear_cached_properties()
+        if not self.is_ecs:
+            self.folio_auth.ecs_central_tenant_id = None
+            self._clear_cached_properties("ecs_consortium", "ecs_members")
+            raise ValueError(f"Tenant {tenant_id} is not an ECS central tenant.")
+
     @property
-    def is_ecs(self):
+    def ecs_central_tenant_id(self):
+        """
+        Property that returns the central tenant ID for an ECS FOLIO system
+        """
+        return self._ecs_central_tenant_id
+
+    @ecs_central_tenant_id.setter
+    def ecs_central_tenant_id(self, tenant_id: str) -> None:
+        self._ecs_central_tenant_id = tenant_id
+        current_tenant_id = self.tenant_id
+        try:
+            if tenant_id != current_tenant_id:
+                self.tenant_id = tenant_id
+                if not self.is_ecs:
+                    raise ValueError(
+                        f"Tenant {tenant_id} is not an ECS central tenant, or user does"
+                        " not have sufficient permissions in the central tenant."
+                    )
+                else:
+                    logger.info(
+                        f"Set ECS central tenant to {tenant_id} "
+                        f"({self.ecs_consortium.get('name', 'unknown')})"
+                    )
+                    self._clear_cached_properties("ecs_members")
+        finally:
+            self.tenant_id = current_tenant_id
+
+    @ecs_central_tenant_id.deleter
+    def ecs_central_tenant_id(self) -> None:
+        self._ecs_central_tenant_id = None
+        self._clear_cached_properties("ecs_consortium", "ecs_members")
+
+    @property
+    def is_ecs(self) -> bool:
         """
         Property that returns True if self.tenant_id is an ECS central tenant.
         """
@@ -426,14 +701,14 @@ class FolioClient:
         """
         Property that returns the ECS consortia for the current tenant.
         """
-        current_tenant_id = self.okapi_headers["x-okapi-tenant"]
+        current_tenant_id = self.tenant_id
+        self.tenant_id = self.ecs_central_tenant_id
         try:
-            self.okapi_headers["x-okapi-tenant"] = self.tenant_id
             consortium = self.folio_get("/consortia", "consortia")[0]
         except (httpx.HTTPStatusError, IndexError):
             consortium = None
         finally:
-            self.okapi_headers["x-okapi-tenant"] = current_tenant_id
+            self.tenant_id = current_tenant_id
         return consortium
 
     @cached_property
@@ -442,15 +717,28 @@ class FolioClient:
         Property that returns the tenants of the ECS consortia.
         """
         if self.is_ecs:
+            current_tenant_id = self.tenant_id
+            self.tenant_id = self.ecs_central_tenant_id
             tenants = self.folio_get(
                 f"/consortia/{self.ecs_consortium['id']}/tenants",
                 "tenants",
                 query_params={"limit": 1000},
             )
             tenants.sort(key=lambda x: x["id"])
+            self.tenant_id = current_tenant_id
             return tenants
         else:
             return []
+
+    @property
+    def okapi_token_expires(self):
+        return self.folio_auth._token.expires_at
+
+    @property
+    def _cookies(self):
+        if self.folio_auth._token_is_expiring():
+            self.login()
+        return self.folio_auth._token.cookies
 
     @folio_retry_on_server_error
     @handle_remote_protocol_error
@@ -458,40 +746,7 @@ class FolioClient:
     def login(self):
         """Logs into FOLIO in order to get the folio access token."""
         if not self.is_closed:
-            payload = {"username": self.username, "password": self.password}
-            # Transitional implementation to support Poppy and pre-Poppy authentication
-            url = urljoin(self.gateway_url, "authn/login-with-expiry")
-            # Poppy and later
-            try:
-                req = self.httpx_client.post(
-                    url,
-                    json=payload,
-                    headers=self.base_headers,
-                    timeout=self.http_timeout,
-                )
-                req.raise_for_status()
-            except httpx.HTTPStatusError:
-                # Pre-Poppy
-                if req.status_code == 404:
-                    url = urljoin(self.gateway_url, "authn/login")
-                    req = self.httpx_client.post(
-                        url,
-                        json=payload,
-                        headers=self.base_headers,
-                        timeout=self.http_timeout,
-                    )
-                    req.raise_for_status()
-                else:
-                    raise
-            response_body = req.json()
-            self._cookies = req.cookies
-            self._okapi_token = req.headers.get("x-okapi-token") or req.cookies.get(
-                "folioAccessToken"
-            )
-            self.okapi_token_expires = date_parse(
-                response_body.get("accessTokenExpiration", "2999-12-31T23:59:59Z")
-            )
-            self.okapi_token_duration = self.okapi_token_expires - datetime.now(tz.utc)
+            _ = self.folio_auth.folio_auth_token  # Force re-authentication if needed
         else:
             raise FolioClientClosed()
 
@@ -638,18 +893,8 @@ class FolioClient:
             query_params = self._construct_query_parameters(query=query, **query_params)
         elif query:
             query_params = self._construct_query_parameters(query=query)
-        if self.httpx_client and not self.httpx_client.is_closed:
-            req = self.httpx_client.get(url, params=query_params, headers=self.okapi_headers)
-            req.raise_for_status()
-        else:
-            req = httpx.get(
-                url,
-                params=query_params,
-                headers=self.okapi_headers,
-                timeout=self.http_timeout,
-                verify=self.ssl_verify,
-            )
-            req.raise_for_status()
+        req = self.httpx_client.get(url, params=query_params)
+        req.raise_for_status()
         return req.json()[key] if key else req.json()
 
     @folio_retry_on_auth_error
@@ -657,10 +902,9 @@ class FolioClient:
     @use_client_session
     def folio_put(self, path, payload, query_params: dict = None):
         """Convenience method to update data in FOLIO"""
-        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+        url = path.rstrip("/")
         req = self.httpx_client.put(
             url,
-            headers=self.okapi_headers,
             json=payload,
             params=query_params,
         )
@@ -678,7 +922,6 @@ class FolioClient:
         url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
         req = self.httpx_client.post(
             url,
-            headers=self.okapi_headers,
             json=payload,
             params=query_params,
         )
@@ -696,7 +939,6 @@ class FolioClient:
         url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
         req = self.httpx_client.delete(
             url,
-            headers=self.okapi_headers,
             params=query_params,
         )
         try:
@@ -720,7 +962,19 @@ class FolioClient:
     def get_folio_http_client(self):
         """Returns a httpx client for use in FOLIO communication"""
         return httpx.Client(
-            timeout=self.http_timeout, verify=self.ssl_verify, base_url=self.gateway_url
+            timeout=self.http_timeout,
+            verify=self.ssl_verify,
+            base_url=self.gateway_url,
+            auth=self.folio_auth,
+        )
+
+    def get_async_folio_http_client(self):
+        """Returns an async httpx client for use in FOLIO communication"""
+        return httpx.AsyncClient(
+            timeout=self.http_timeout,
+            verify=self.ssl_verify,
+            base_url=self.gateway_url,
+            auth=self.folio_auth,
         )
 
     def folio_get_single_object(self, path):
@@ -936,13 +1190,16 @@ class FolioClient:
         gs = self.folio_get_all(path, name, query)
         return [f["id"] for f in gs]
 
+    @use_client_session
     def put_user(self, user):
         """Fetches data from FOLIO and turns it into a json object as is"""
-        url = urljoin(self.gateway_url, f"users/{user['id']}")
+        url = f"/users/{user['id']}"
         print(url)
-        req = httpx.put(url, headers=self.okapi_headers, json=user, verify=self.ssl_verify)
-        print(f"{req.status_code}")
-        req.raise_for_status()
+        try:
+            req = self.folio_put(url, user)
+        except httpx.HTTPStatusError as exc:
+            print(f"Error updating user {user['username']}: {exc}")
+            raise
 
 
 def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id):
