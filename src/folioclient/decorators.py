@@ -1,11 +1,15 @@
 """This module contains decorators for the FolioClient package."""
 
+from http import HTTPStatus
+import inspect
 import logging
 import os
 import time
 from functools import wraps
 
 import httpx
+
+from folioclient.exceptions import FolioClientClosed
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +232,7 @@ def get_retry_on_auth_error_delay():
 def should_retry_on_auth_error(exc):
     """
     Determine if a request should be retried. If the exception
-    is a ConnectError or HTTPStatusError with a status code of 401,
+    is an HTTPStatusError with a status code of 403,
     the function returns true.
 
     parmeters:
@@ -237,34 +241,68 @@ def should_retry_on_auth_error(exc):
     returns:
         True if the request should be retried, False otherwise
     """
-    return exc.response.status_code in [401, 403]
+    return exc.response.status_code == HTTPStatus.FORBIDDEN
 
 
 def handle_remote_protocol_error(func):
     """
     Decorator to catch httpx.RemoteProtocolError, recreate the httpx.Client,
-    and retry the request.
+    and retry the request. Works with both sync and async methods.
     """
 
     @wraps(func)
-    def wrapper(self, *args, **kwargs):
+    def sync_wrapper(self, *args, **kwargs):
         try:
             return func(self, *args, **kwargs)
         except httpx.RemoteProtocolError:
             logging.warning("Caught httpx.RemoteProtocolError. Recreate httpx.Client and retry.")
             # Close the existing client if it exists
-            if self.httpx_client and not self.httpx_client.is_closed:
+            if (
+                hasattr(self, "httpx_client")
+                and self.httpx_client
+                and not self.httpx_client.is_closed
+            ):
                 self.httpx_client.close()
             # Recreate the httpx.Client
             self.httpx_client = httpx.Client(
                 timeout=self.http_timeout,
                 verify=self.ssl_verify,
                 base_url=self.gateway_url,
+                auth=self.folio_auth,
             )
             # Retry the request
             return func(self, *args, **kwargs)
 
-    return wrapper
+    @wraps(func)
+    async def async_wrapper(self, *args, **kwargs):
+        try:
+            return await func(self, *args, **kwargs)
+        except httpx.RemoteProtocolError:
+            logging.warning(
+                "Caught httpx.RemoteProtocolError. Recreate httpx.AsyncClient and retry."
+            )
+            # Close the existing async client if it exists
+            if (
+                hasattr(self, "httpx_async_client")
+                and self.httpx_async_client
+                and not self.httpx_async_client.is_closed
+            ):
+                await self.httpx_async_client.aclose()
+            # Recreate the httpx.AsyncClient
+            self.httpx_async_client = httpx.AsyncClient(
+                timeout=self.http_timeout,
+                verify=self.ssl_verify,
+                base_url=self.gateway_url,
+                auth=self.folio_auth,
+            )
+            # Retry the request
+            return await func(self, *args, **kwargs)
+
+    # Return the appropriate wrapper based on whether the function is async
+    if inspect.iscoroutinefunction(func):
+        return async_wrapper
+    else:
+        return sync_wrapper
 
 
 def use_client_session_with_generator(func):
@@ -275,16 +313,24 @@ def use_client_session_with_generator(func):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if not self.httpx_client or self.httpx_client.is_closed:
+        needs_temp_client = (
+            not hasattr(self, "httpx_client")
+            or not self.httpx_client
+            or self.httpx_client.is_closed
+        )
+        if needs_temp_client:
             with httpx.Client(
                 timeout=self.http_timeout,
                 verify=self.ssl_verify,
                 base_url=self.gateway_url,
+                auth=self.folio_auth,
             ) as httpx_client:
                 self.httpx_client = httpx_client
                 yield from func(self, *args, **kwargs)
-        else:
+        elif not self.is_closed:
             yield from func(self, *args, **kwargs)
+        else:
+            raise FolioClientClosed()
 
     return wrapper
 
@@ -297,15 +343,23 @@ def use_client_session(func):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if not self.httpx_client or self.httpx_client.is_closed:
+        needs_temp_client = (
+            not hasattr(self, "httpx_client")
+            or not self.httpx_client
+            or self.httpx_client.is_closed
+        )
+        if needs_temp_client:
             with httpx.Client(
                 timeout=self.http_timeout,
                 verify=self.ssl_verify,
                 base_url=self.gateway_url,
+                auth=self.folio_auth,
             ) as httpx_client:
                 self.httpx_client = httpx_client
                 return func(self, *args, **kwargs)
-        else:
+        elif not self.is_closed:
             return func(self, *args, **kwargs)
+        else:
+            raise FolioClientClosed()
 
     return wrapper
