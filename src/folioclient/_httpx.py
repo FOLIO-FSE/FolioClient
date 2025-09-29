@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import threading
 import httpx
 
 from dataclasses import dataclass
@@ -37,7 +38,7 @@ class FolioAuth(httpx.Auth):
     """
 
     class _Token(NamedTuple):
-        value: str
+        auth_token: str
         refresh_token: str
         expires_at: datetime | None
         refresh_token_expires_at: datetime | None
@@ -45,12 +46,13 @@ class FolioAuth(httpx.Auth):
 
     def __init__(self, params: FolioConnectionParameters):
         self._params = params
-        self._token: FolioAuth._Token | None = None
         self._tenant_id = params.tenant_id
         self._base_headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        self._token: FolioAuth._Token = self._do_sync_auth()
+        self._lock: threading.RLock = threading.RLock()
 
     @property
     def tenant_id(self) -> str:
@@ -68,13 +70,11 @@ class FolioAuth(httpx.Auth):
         self, request: httpx.Request
     ) -> "Generator[httpx.Request, httpx.Response, None]":
         """Synchronous authentication flow for httpx.Client"""
-        if self._token is None:
-            self._token = self._do_sync_auth(self._params)
+        with self._lock:
+            if not self._token or self._token_is_expiring():
+                self._token = self._do_sync_auth()
 
-        if self._token_is_expiring():
-            self._token = self._do_sync_auth(self._params)
-
-        request.headers["x-okapi-token"] = self._token.value
+        request.headers["x-okapi-token"] = self._token.auth_token
 
         # Set tenant header if not already present (allows per-request override)
         if "x-okapi-tenant" not in request.headers:
@@ -83,21 +83,33 @@ class FolioAuth(httpx.Auth):
         response = yield request
 
         if response.status_code == HTTPStatus.UNAUTHORIZED:
-            self._token = self._do_sync_auth(self._params)
-            request.headers["x-okapi-token"] = self._token.value
-            yield request
+            with self._lock:
+                if self._token and not self._token_is_expiring():
+                    # Another thread refreshed the token while we were waiting for the lock
+                    pass
+                else:
+                    self._token = self._do_sync_auth()
+            request.headers["x-okapi-token"] = self._token.auth_token
+            retry_response = yield request
+
+            # If still unauthorized after fresh auth, something is seriously wrong
+            if retry_response.status_code == HTTPStatus.UNAUTHORIZED:
+                raise httpx.HTTPStatusError(
+                    "Authentication failed after token refresh."
+                    " Check credentials and authorization.",
+                    request=request,
+                    response=retry_response,
+                )
 
     async def async_auth_flow(
         self, request: httpx.Request
     ) -> "AsyncGenerator[httpx.Request, httpx.Response]":
         """Asynchronous authentication flow for httpx.AsyncClient"""
-        if self._token is None:
-            self._token = await self._do_async_auth(self._params)
+        with self._lock:
+            if not self._token or self._token_is_expiring():
+                self._token = await self._do_async_auth()
 
-        if self._token_is_expiring():
-            self._token = await self._do_async_auth(self._params)
-
-        request.headers["x-okapi-token"] = self._token.value
+        request.headers["x-okapi-token"] = self._token.auth_token
 
         # Set tenant header if not already present (allows per-request override)
         if "x-okapi-tenant" not in request.headers:
@@ -106,9 +118,24 @@ class FolioAuth(httpx.Auth):
         response = yield request
 
         if response.status_code == HTTPStatus.UNAUTHORIZED:
-            self._token = await self._do_async_auth(self._params)
-            request.headers["x-okapi-token"] = self._token.value
-            yield request
+            with self._lock:
+                if self._token and not self._token_is_expiring():
+                    # Another thread refreshed the token while we were waiting for the lock
+                    pass
+                else:
+                    self._token = await self._do_async_auth()
+
+            request.headers["x-okapi-token"] = self._token.auth_token
+            retry_response = yield request
+
+            # If still unauthorized after fresh auth, something is seriously wrong
+            if retry_response.status_code == HTTPStatus.UNAUTHORIZED:
+                raise httpx.HTTPStatusError(
+                    "Authentication failed after token refresh."
+                    " Check credentials and authorization.",
+                    request=request,
+                    response=retry_response,
+                )
 
     def _do_sync_auth(self) -> _Token:
         """Synchronous authentication with the FOLIO system."""
@@ -140,7 +167,7 @@ class FolioAuth(httpx.Auth):
                 )
 
             return FolioAuth._Token(
-                value=token,
+                auth_token=token,
                 refresh_token=refresh_token,
                 expires_at=expires_at,
                 refresh_token_expires_at=refresh_token_expires_at,
@@ -179,22 +206,33 @@ class FolioAuth(httpx.Auth):
                 )
 
             return FolioAuth._Token(
-                value=token,
+                auth_token=token,
                 refresh_token=refresh_token,
                 expires_at=expires_at,
                 refresh_token_expires_at=refresh_token_expires_at,
+                cookies=response.cookies,
             )
 
     def _token_is_expiring(self) -> bool:
         """Returns true if token is within 60 seconds of expiration"""
         return (
-            self._token.expires_at
-            and (datetime.now(tz=timezone.utc) - timedelta(seconds=60)) >= self._token.expires_at
+            not self._token
+            or not self._token.expires_at
+            or (datetime.now(tz=timezone.utc) + timedelta(seconds=60)) >= self._token.expires_at
         )
 
     @property
     def folio_auth_token(self):
         """Property that returns a currently valid FOLIO auth token"""
-        if self._token is None or self._token_is_expiring():
-            self._token = self._do_sync_auth()
-        return self._token.value
+        with self._lock:
+            if not self._token or self._token_is_expiring():
+                self._token = self._do_sync_auth()
+            return self._token.auth_token
+
+    @property
+    def folio_refresh_token(self):
+        """Property that returns the currently valid FOLIO refresh token"""
+        with self._lock:
+            if not self._token or self._token_is_expiring():
+                self._token = self._do_sync_auth()
+            return self._token.refresh_token
