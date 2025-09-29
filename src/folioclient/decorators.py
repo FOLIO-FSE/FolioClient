@@ -1,5 +1,6 @@
 """This module contains decorators for the FolioClient package."""
 
+import asyncio
 from http import HTTPStatus
 import inspect
 import logging
@@ -39,6 +40,36 @@ def find_folio_client(*args, **kwargs):
             return arg
 
     return None
+
+async def handle_retry_async(func, exc, retry, max_retries, retry_delay):
+    """
+    Handle a retry of a request (async).
+
+    If the maximum number of retries has been reached, log an
+    exception and re-raise the original exception.
+
+    Parameters:
+        func (Callable): The function that raised the exception.
+        exc (Exception): The exception raised by the function.
+        retry (int): The current retry number.
+        max_retries (int): The maximum number of retries.
+        retry_delay (int): The delay between retries in seconds.
+
+    Raises:
+        Exception: The original exception raised by the decorated function.
+    """
+    if retry == max_retries:
+        logger.exception(
+            f'HTTP request error calling {func.__name__}: "{exc}"'
+            "Maximum number of retries reached, giving up."
+        )
+        raise exc
+    logger.info(
+        f'HTTP request error calling {func.__name__}: "{exc}"'
+        f"Retrying again in {retry_delay} seconds. "
+        f"Retry {retry + 1}/{max_retries}"
+    )
+    await asyncio.sleep(retry_delay)
 
 
 def handle_retry(func, exc, retry, max_retries, retry_delay):
@@ -97,7 +128,24 @@ def folio_retry_on_server_error(func):
                 else:
                     raise exc
 
-    return wrapper
+    @wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        max_retries = get_max_on_server_error_retries()
+        retry_factor = get_retry_on_server_error_factor()
+        retry_delay = get_retry_on_server_error_delay()
+        for retry in range(max_retries + 1):
+            try:
+                return await func(*args, **kwargs)
+            except (httpx.ConnectError, httpx.HTTPStatusError) as exc:
+                if should_retry_on_server_error(exc):
+                    await handle_retry_async(func, exc, retry, max_retries, retry_delay)
+                    retry_delay *= retry_factor
+                else:
+                    raise exc
+    if inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func):
+        return async_wrapper
+    else:
+        return wrapper
 
 
 def get_retry_on_server_error_factor():
@@ -199,12 +247,12 @@ def folio_retry_on_auth_error(func): # noqa: C901
                 return await func(*args, **kwargs)
             except httpx.HTTPStatusError as exc:
                 if should_retry_on_auth_error(exc):
-                    handle_retry(func, exc, retry, max_retries, retry_delay)
+                    await handle_retry_async(func, exc, retry, max_retries, retry_delay)
                     retry_delay *= retry_factor
                 else:
                     raise exc
 
-    if inspect.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func):
         return async_wrapper
     else:
         return wrapper
@@ -319,7 +367,7 @@ def handle_remote_protocol_error(func):
             return await func(self, *args, **kwargs)
 
     # Return the appropriate wrapper based on whether the function is async
-    if inspect.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func):
         return async_wrapper
     else:
         return sync_wrapper
@@ -375,7 +423,7 @@ def use_client_session_with_generator(func):
         else:
             raise FolioClientClosed()
 
-    if inspect.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func):
         return async_wrapper
     else:
         return wrapper
@@ -429,7 +477,7 @@ def use_client_session(func):
         else:
             raise FolioClientClosed()
 
-    if inspect.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func):
         return async_wrapper
     else:
         return wrapper
