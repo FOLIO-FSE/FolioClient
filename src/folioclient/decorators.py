@@ -160,7 +160,7 @@ def should_retry_on_server_error(exc):
     ]
 
 
-def folio_retry_on_auth_error(func):
+def folio_retry_on_auth_error(func): # noqa: C901
     """Retry a function if an authentication error is encountered.
 
     Args:
@@ -187,7 +187,27 @@ def folio_retry_on_auth_error(func):
                 else:
                     raise exc
 
-    return wrapper
+    @wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        max_retries = get_max_on_auth_error_retries()
+        retry_factor = get_retry_on_auth_error_factor()
+        retry_delay = get_retry_on_auth_error_delay()
+        for retry in range(max_retries + 1):
+            if (folio_client := find_folio_client(*args, **kwargs)) and retry:
+                await folio_client.async_login()
+            try:
+                return await func(*args, **kwargs)
+            except httpx.HTTPStatusError as exc:
+                if should_retry_on_auth_error(exc):
+                    handle_retry(func, exc, retry, max_retries, retry_delay)
+                    retry_delay *= retry_factor
+                else:
+                    raise exc
+
+    if inspect.iscoroutinefunction(func):
+        return async_wrapper
+    else:
+        return wrapper
 
 
 def get_retry_on_auth_error_factor():
@@ -332,7 +352,33 @@ def use_client_session_with_generator(func):
         else:
             raise FolioClientClosed()
 
-    return wrapper
+    @wraps(func)
+    async def async_wrapper(self, *args, **kwargs):
+        needs_temp_client = (
+            not hasattr(self, "async_httpx_client")
+            or not self.async_httpx_client
+            or self.async_httpx_client.is_closed
+        )
+        if needs_temp_client:
+            async with httpx.AsyncClient(
+                timeout=self.http_timeout,
+                verify=self.ssl_verify,
+                base_url=self.gateway_url,
+                auth=self.folio_auth,
+            ) as async_httpx_client:
+                self.async_httpx_client = async_httpx_client
+                async for item in func(self, *args, **kwargs):
+                    yield item
+        elif not self.is_closed:
+            async for item in func(self, *args, **kwargs):
+                yield item
+        else:
+            raise FolioClientClosed()
+
+    if inspect.iscoroutinefunction(func):
+        return async_wrapper
+    else:
+        return wrapper
 
 
 def use_client_session(func):
@@ -362,4 +408,28 @@ def use_client_session(func):
         else:
             raise FolioClientClosed()
 
-    return wrapper
+    @wraps(func)
+    async def async_wrapper(self, *args, **kwargs):
+        needs_temp_client = (
+            not hasattr(self, "async_httpx_client")
+            or not self.async_httpx_client
+            or self.async_httpx_client.is_closed
+        )
+        if needs_temp_client:
+            async with httpx.AsyncClient(
+                timeout=self.http_timeout,
+                verify=self.ssl_verify,
+                base_url=self.gateway_url,
+                auth=self.folio_auth,
+            ) as async_httpx_client:
+                self.async_httpx_client = async_httpx_client
+                return await func(self, *args, **kwargs)
+        elif not self.is_closed:
+            return await func(self, *args, **kwargs)
+        else:
+            raise FolioClientClosed()
+
+    if inspect.iscoroutinefunction(func):
+        return async_wrapper
+    else:
+        return wrapper
