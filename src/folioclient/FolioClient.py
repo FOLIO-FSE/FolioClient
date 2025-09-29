@@ -2,7 +2,6 @@ import hashlib
 import json
 import logging
 import os
-import random
 import re
 from datetime import datetime, timedelta
 from datetime import timezone as tz
@@ -122,7 +121,14 @@ class FolioClient:
     """  # noqa: E501
 
     def __init__(
-        self, gateway_url, tenant_id, username, password, *, ssl_verify=True, okapi_url=None
+        self,
+        gateway_url,
+        tenant_id,
+        username,
+        password,
+        *,
+        ssl_verify=True,
+        okapi_url=None,
     ):
         if okapi_url:
             warn(
@@ -149,40 +155,46 @@ class FolioClient:
         )
         self.folio_auth: FolioAuth = FolioAuth(self.folio_parameters)
         self.httpx_client = None
-        self.okapi_token_time_remaining_threshold = float(
-            os.environ.get("FOLIOCLIENT_REFRESH_API_TOKEN_TIME_REMAINING", ".2")
-        )
+        self.async_httpx_client = None
         self.base_headers = {
             "content-type": CONTENT_TYPE_JSON,
         }
         self._folio_headers = FolioHeadersDict(self)
         self.is_closed = False
-        self.login()
-        if self.is_ecs:
-            logger.info(
-                f"Connected to ECS central tenant {self.tenant_id}"
-                f" ({self.ecs_consortium.get('name', 'unknown')})"
-            )
-            self.ecs_central_tenant_id = self.tenant_id
+        self._ecs_central_tenant_id = None
+        self._initial_ecs_check()
+
+    def _initial_ecs_check(self):
+        """Check if initial tenant_id value is an ecs_central_tenant_id"""
+        try:
+            try:
+                self._ecs_consortium = self.folio_get("/consortium", "consortium")[0]
+                self.set_central_tenant_id(self.folio_parameters.tenant_id)
+                logger.info(
+                    f"Connected to ECS central tenant {self.folio_parameters.tenant_id}"
+                    f" ({self.ecs_consortium.get('name', 'unknown')})"
+                )
+            except (httpx.HTTPError, IndexError):
+                logger.debug(
+                    f"Provided tenant_id ({self.folio_parameters.tenant_id}) is not an ECS central tenant"  # noqa: E501
+                    " or user is not authorized to access consortia APIs"
+                )
+        except ValueError:
+            self._ecs_central_tenant_id = None
 
     def __repr__(self) -> str:
         return f"FolioClient for tenant {self.tenant_id} at {self.gateway_url} as {self.username}"
 
     def __enter__(self):
         """Context manager for FolioClient"""
-        self.httpx_client = httpx.Client(
-            timeout=self.folio_parameters.timeout,
-            verify=self.folio_parameters.ssl_verify,
-            base_url=self.folio_parameters.gateway_url,
-            auth=self.folio_auth,
-        )
+        self.httpx_client = self.get_folio_http_client()
+        self.async_httpx_client = self.get_async_folio_http_client()
         return self
 
     @handle_remote_protocol_error
     @use_client_session
     def __exit__(self, exc_type, exc_value, traceback):
         """Context manager exit method"""
-        self.is_closed = True
         if self.cookies:
             logger.info("logging out...")
             logout = self.httpx_client.post(
@@ -200,6 +212,45 @@ class FolioClient:
                 logger.warning("Logout endpoint not reachable, skipping logout.")
         if hasattr(self, "httpx_client") and self.httpx_client and not self.httpx_client.is_closed:
             self.httpx_client.close()
+
+        self.is_closed = True
+        self.folio_parameters = None
+        if hasattr(self, "folio_auth"):
+            self.folio_auth._token = None
+            self.folio_auth._params = None
+
+    async def __aenter__(self):
+        """Asynchronous context manager for FolioClient"""
+        self.httpx_client = self.get_folio_http_client()
+        self.async_httpx_client = self.get_async_folio_http_client()
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        """Asynchronous context manager exit method"""
+        if self.cookies:
+            logger.info("logging out...")
+            logout = await self.async_httpx_client.post(
+                urljoin(self.gateway_url, "authn/logout"),
+            )
+            try:
+                logout.raise_for_status()
+                logger.info("Logged out")
+            except httpx.HTTPStatusError:
+                if logout.status_code == 404:
+                    logger.warning("Logout endpoint not found, skipping logout.")
+                else:
+                    logger.error(f"Logout failed: ({logout.status_code}) {logout.text}")
+            except httpx.HTTPConnectError:
+                logger.warning("Logout endpoint not reachable, skipping logout.")
+        if (
+            hasattr(self, "async_httpx_client")
+            and self.async_httpx_client
+            and not self.async_httpx_client.is_closed
+        ):
+            await self.async_httpx_client.aclose()
+        if hasattr(self, "httpx_client") and self.httpx_client and not self.httpx_client.is_closed:
+            self.httpx_client.close()
+        self.is_closed = True
         self.folio_parameters = None
         if hasattr(self, "folio_auth"):
             self.folio_auth._token = None
@@ -232,6 +283,13 @@ class FolioClient:
 
     def close(self):
         self.__exit__(None, None, None)
+
+    async def async_close(self):
+        """Manually close the FolioClient object
+
+        This should only be used when running FolioClient outside a context manager
+        """
+        await self.__aexit__(None, None, None)
 
     @property
     def tenant_id(self):
@@ -631,7 +689,7 @@ class FolioClient:
             raise FolioClientClosed()
         else:
             _ = self.okapi_token  # Ensure token is valid
-            return self.folio_auth._token.refresh_token
+            return self.folio_auth.folio_refresh_token
 
     @property
     def cookies(self) -> CookieTypes:
@@ -661,14 +719,17 @@ class FolioClient:
         """
         Property that returns the central tenant ID for an ECS FOLIO system
         """
-        return self._ecs_central_tenant_id
+        if hasattr(self, "_ecs_central_tenant_id") and self._ecs_central_tenant_id:
+            return self._ecs_central_tenant_id
+        return None
 
     @ecs_central_tenant_id.setter
     def ecs_central_tenant_id(self, tenant_id: str) -> None:
-        self._ecs_central_tenant_id = tenant_id
-        current_tenant_id = self.tenant_id
-        try:
-            if tenant_id != current_tenant_id:
+        if tenant_id != self._ecs_central_tenant_id:
+            self._ecs_central_tenant_id = tenant_id
+            current_tenant_id = self.tenant_id
+            self._clear_cached_properties("ecs_consortium", "ecs_members")
+            try:
                 self.tenant_id = tenant_id
                 if not self.is_ecs:
                     raise ValueError(
@@ -681,8 +742,8 @@ class FolioClient:
                         f"({self.ecs_consortium.get('name', 'unknown')})"
                     )
                     self._clear_cached_properties("ecs_members")
-        finally:
-            self.tenant_id = current_tenant_id
+            finally:
+                self.tenant_id = current_tenant_id
 
     @ecs_central_tenant_id.deleter
     def ecs_central_tenant_id(self) -> None:
@@ -701,6 +762,9 @@ class FolioClient:
         """
         Property that returns the ECS consortia for the current tenant.
         """
+        if hasattr(self, "_ecs_consortium"):
+            return self._ecs_consortium
+
         current_tenant_id = self.tenant_id
         self.tenant_id = self.ecs_central_tenant_id
         try:
@@ -734,19 +798,21 @@ class FolioClient:
     def okapi_token_expires(self):
         return self.folio_auth._token.expires_at
 
-    @property
-    def _cookies(self):
-        if self.folio_auth._token_is_expiring():
-            self.login()
-        return self.folio_auth._token.cookies
+    @folio_retry_on_server_error
+    def login(self):
+        """Logs into FOLIO in order to get a new FOLIO access token"""
+        if not self.is_closed:
+            self.folio_auth._token = (
+                self.folio_auth._do_sync_auth()
+            )  # Force re-authentication if needed
+        else:
+            raise FolioClientClosed()
 
     @folio_retry_on_server_error
-    @handle_remote_protocol_error
-    @use_client_session
-    def login(self):
-        """Logs into FOLIO in order to get the folio access token."""
+    async def async_login(self):
+        """Logs into FOLIO in order to get a new FOLIO access token (async)"""
         if not self.is_closed:
-            _ = self.folio_auth.folio_auth_token  # Force re-authentication if needed
+            self.folio_auth._token = await self.folio_auth._do_async_auth()
         else:
             raise FolioClientClosed()
 
@@ -754,6 +820,13 @@ class FolioClient:
         """Alias for `close`"""
         if not self.is_closed:
             self.close()
+        else:
+            raise FolioClientClosed()
+
+    async def async_logout(self):
+        """Alias for `async_close`"""
+        if not self.is_closed:
+            await self.async_close()
         else:
             raise FolioClientClosed()
 
@@ -1148,19 +1221,6 @@ class FolioClient:
             "updatedDate": datetime.now(tz=tz.utc).isoformat(timespec="milliseconds"),
             "updatedByUserId": user_id,
         }
-
-    def get_random_objects(self, path, count=1, query=""):
-        # TODO: add exception handling and logging
-        resp = self.folio_get(path)
-        total = int(resp["totalRecords"])
-        name = next(f for f in [*resp] if f != "totalRecords")
-        rand = random.randint(0, total)  # noqa # NOSONAR not used in secure context
-        query_params = {}
-        query_params["query"] = query or self.cql_all
-        query_params["limit"] = count
-        query_params["offset"] = rand
-        print(f"{total} {path} found, picking {count} from {rand} onwards")
-        return list(self.folio_get(path, name, query_params=query_params))
 
     def get_loan_policy_id(self, item_type_id, loan_type_id, patron_group_id, location_id):
         """retrieves a loan policy from FOLIO, or uses a chached one"""
