@@ -91,12 +91,12 @@ def handle_retry(func, exc, retry, max_retries, retry_delay):
     """
     if retry == max_retries:
         logger.exception(
-            f'HTTP request error calling {func.__name__}: "{exc}"'
+            f'HTTP request error calling {func.__name__}: "{exc}". '
             "Maximum number of retries reached, giving up."
         )
         raise exc
     logger.info(
-        f'HTTP request error calling {func.__name__}: "{exc}"'
+        f'HTTP request error calling {func.__name__}: "{exc}". '
         f"Retrying again in {retry_delay} seconds. "
         f"Retry {retry + 1}/{max_retries}"
     )
