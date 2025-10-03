@@ -3,13 +3,19 @@
 FOLIO Client is a simple python (3) wrapper over the FOLIO LMS system API:s
 
 ## Features
-* Convenient FOLIO login and OKAPI Token creation
+* Convenient FOLIO login and OKAPI Token creation and lifecycle management (RTR support)
+  * Access to valid access token via `tenant_id`, `okapi_headers`, and `folio_headers` properties (for use http libraries other than httpx)
+  * Tokens are automatically refreshed when needed
+  * `get_folio_http_client` and `get_folio_http_client_async` methods to instantiate an `httpx.Client` or `httpx.AsyncClient` with built folio-specific parameters, including a custom auth class to manage authentication
 * Wrappers for various REST operations
 * Most common reference data for inventory are retrieved as cached properties. 
-* Fetches the latest released schemas for instances, holdings and items. Very useful for JSON Schema based validation.
+* Fetches the latest released schemas for instances, holdings and items. Very useful for JSON Schema based validation
+* ECS convenience properties (`ecs_consortium` (the consortium object), `ecs_members` (list of member objects))
 
 ## Installing
-```pip install folioclient ```
+```pip install folioclient ```(using `pip`)
+
+```uv pip install folioclient``` (using `uv`)
 
 ## Basic Usage
 
@@ -95,16 +101,16 @@ with requests.Session() as client:
 ```
 
 ### Switching tenants in a consortial (ECS) environment
-When working with an ECS environment, you can authenticate as a user with multiple tenant affiliations and switch affiliations simply by assigning the desired tenant's tenant ID value to the `okapi_headers['x-okapi-tenant']` key:
+When working with an ECS environment, you can authenticate as a user with multiple tenant affiliations and switch affiliations simply by assigning the desired tenant's tenant ID value to the `tenant_id` property:
 ```Python
-fc.okapi_headers['x-okapi-tenant']
+fc.tenant_id
 'cs01'
 
 # Assign member tenant ID
-fc.okapi_headers['x-okapi-tenant'] = "cs01m0001"
+fc.tenant_id = "cs01m0001"
 
-# Reset the headers back to original tenant
-del fc.okapi_headers
-fc.okapi_headers['x-okapi-tenant']
+# Reset the property back to original tenant ID
+del fc.tenant_id
+fc.tenant_id
 'cs01'
 ```
