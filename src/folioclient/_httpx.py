@@ -74,7 +74,7 @@ class FolioAuth(httpx.Auth):
             if not self._token or self._token_is_expiring():
                 self._token = self._do_sync_auth()
 
-        request.headers["x-okapi-token"] = self._token.auth_token
+        self._set_auth_cookies_on_request(request)
 
         # Set tenant header if not already present (allows per-request override)
         if "x-okapi-tenant" not in request.headers:
@@ -89,7 +89,8 @@ class FolioAuth(httpx.Auth):
                     pass
                 else:
                     self._token = self._do_sync_auth()
-            request.headers["x-okapi-token"] = self._token.auth_token
+
+            self._set_auth_cookies_on_request(request)
             retry_response = yield request
 
             # If still unauthorized after fresh auth, something is seriously wrong
@@ -109,7 +110,7 @@ class FolioAuth(httpx.Auth):
             if not self._token or self._token_is_expiring():
                 self._token = await self._do_async_auth()
 
-        request.headers["x-okapi-token"] = self._token.auth_token
+        self._set_auth_cookies_on_request(request)
 
         # Set tenant header if not already present (allows per-request override)
         if "x-okapi-tenant" not in request.headers:
@@ -125,7 +126,7 @@ class FolioAuth(httpx.Auth):
                 else:
                     self._token = await self._do_async_auth()
 
-            request.headers["x-okapi-token"] = self._token.auth_token
+            self._set_auth_cookies_on_request(request)
             retry_response = yield request
 
             # If still unauthorized after fresh auth, something is seriously wrong
@@ -212,6 +213,36 @@ class FolioAuth(httpx.Auth):
                 refresh_token_expires_at=refresh_token_expires_at,
                 cookies=response.cookies,
             )
+
+    def _set_auth_cookies_on_request(self, request: httpx.Request) -> None:
+        """Set authentication cookies on request, overriding any existing FOLIO auth cookies"""
+        existing_cookie_header = request.headers.get("Cookie", "")
+
+        # Parse existing cookies and filter out FOLIO auth cookies
+        existing_cookies = {}
+        if existing_cookie_header:
+            for cookie_pair in existing_cookie_header.split("; "):
+                if "=" in cookie_pair:
+                    name, value = cookie_pair.split("=", 1)
+                    # Skip FOLIO auth cookies - we'll override them
+                    if name not in ("folioAccessToken", "folioRefreshToken"):
+                        existing_cookies[name] = value
+
+        # Add our authentication cookies
+        auth_cookies = {}
+        for name, value in self._token.cookies.items():
+            auth_cookies[name] = value
+
+        # Combine all cookies
+        all_cookies = {**existing_cookies, **auth_cookies}
+
+        # Set the combined cookie header
+        if all_cookies:
+            cookie_pairs = [f"{name}={value}" for name, value in all_cookies.items()]
+            request.headers["Cookie"] = "; ".join(cookie_pairs)
+        elif existing_cookie_header:
+            # If we only had FOLIO cookies and removed them, clear the header
+            request.headers.pop("Cookie", None)
 
     def _token_is_expiring(self) -> bool:
         """Returns true if token is within 60 seconds of expiration"""
