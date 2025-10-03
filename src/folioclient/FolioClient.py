@@ -704,9 +704,9 @@ class FolioClient:
                     f" ({tenant_name_map.get(self.folio_parameters.tenant_id, 'unknown')})"
                 )
             except (httpx.HTTPError, IndexError):
-                logger.debug(
+                logger.info(
                     f"Provided tenant_id ({self.folio_parameters.tenant_id}) is not an ECS "
-                    "central tenant or user is not authorized to access consortia APIs"
+                    "central tenant or user is not authorized to access mod-consortia APIs"
                 )
         except ValueError:
             self._ecs_central_tenant_id = None
