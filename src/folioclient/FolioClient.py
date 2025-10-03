@@ -161,25 +161,7 @@ class FolioClient:
         self._folio_headers = FolioHeadersDict(self)
         self.is_closed = False
         self._ecs_central_tenant_id = None
-        self._initial_ecs_check()
-
-    def _initial_ecs_check(self):
-        """Check if initial tenant_id value is an ecs_central_tenant_id"""
-        try:
-            try:
-                self._ecs_consortium = self.folio_get("/consortium", "consortium")[0]
-                self.set_central_tenant_id(self.folio_parameters.tenant_id)
-                logger.info(
-                    f"Connected to ECS central tenant {self.folio_parameters.tenant_id}"
-                    f" ({self.ecs_consortium.get('name', 'unknown')})"
-                )
-            except (httpx.HTTPError, IndexError):
-                logger.debug(
-                    f"Provided tenant_id ({self.folio_parameters.tenant_id}) is not an ECS central tenant"  # noqa: E501
-                    " or user is not authorized to access consortia APIs"
-                )
-        except ValueError:
-            self._ecs_central_tenant_id = None
+        self._ecs_checked = False
 
     def __repr__(self) -> str:
         return f"FolioClient for tenant {self.tenant_id} at {self.gateway_url} as {self.username}"
@@ -187,7 +169,9 @@ class FolioClient:
     def __enter__(self):
         """Context manager for FolioClient"""
         self.httpx_client = self.get_folio_http_client()
-        self.async_httpx_client = self.get_async_folio_http_client()
+        self.async_httpx_client = self.get_folio_http_client_async()
+        # Call ECS check after clients are initialized
+        self._initial_ecs_check()
         return self
 
     @handle_remote_protocol_error
@@ -221,7 +205,9 @@ class FolioClient:
     async def __aenter__(self):
         """Asynchronous context manager for FolioClient"""
         self.httpx_client = self.get_folio_http_client()
-        self.async_httpx_client = self.get_async_folio_http_client()
+        self.async_httpx_client = self.get_folio_http_client_async()
+        # Call ECS check after clients are initialized
+        self._initial_ecs_check()
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
@@ -702,47 +688,95 @@ class FolioClient:
         else:
             raise FolioClientClosed()
 
-    def set_central_tenant(self, tenant_id):
-        """
-        Method to set self.tenant_id to an ECS central tenant.
-        """
-        self.ecs_central_tenant_id = tenant_id
-        self._clear_cached_properties()
-        if not self.is_ecs:
-            self.folio_auth.ecs_central_tenant_id = None
-            self._clear_cached_properties("ecs_consortium", "ecs_members")
-            raise ValueError(f"Tenant {tenant_id} is not an ECS central tenant.")
+    def _initial_ecs_check(self):
+        """Check if initial tenant_id value is an ecs_central_tenant_id"""
+        if self._ecs_checked:
+            return
+
+        try:
+            try:
+                self._ecs_consortium = self.folio_get("/consortia", "consortia")[0]
+                self._ecs_members = self.folio_get(f"/consortia/{self._ecs_consortium['id']}/tenants", "tenants")
+                tenant_name_map = {t["id"]: t["name"] for t in self._ecs_members}
+                self._ecs_central_tenant_id = self.folio_parameters.tenant_id
+                logger.info(
+                    f"Connected to ECS central tenant {self.folio_parameters.tenant_id}"
+                    f" ({tenant_name_map.get(self.folio_parameters.tenant_id, 'unknown')})"
+                )
+            except (httpx.HTTPError, IndexError):
+                logger.debug(
+                    f"Provided tenant_id ({self.folio_parameters.tenant_id}) is not an ECS "
+                    "central tenant or user is not authorized to access consortia APIs"
+                )
+        except ValueError:
+            self._ecs_central_tenant_id = None
+        finally:
+            self._ecs_checked = True
 
     @property
     def ecs_central_tenant_id(self):
         """
         Property that returns the central tenant ID for an ECS FOLIO system
         """
+        # Lazy initialization: check ECS status on first access if not already done
+        if not self._ecs_checked:
+            self._initial_ecs_check()
+
         if hasattr(self, "_ecs_central_tenant_id") and self._ecs_central_tenant_id:
             return self._ecs_central_tenant_id
         return None
 
     @ecs_central_tenant_id.setter
     def ecs_central_tenant_id(self, tenant_id: str) -> None:
-        if tenant_id != self._ecs_central_tenant_id:
-            self._ecs_central_tenant_id = tenant_id
+        """
+        Setter for ECS central tenant ID. Validates that the tenant is actually
+        an ECS central tenant and the user has sufficient permissions.
+
+        This allows users who authenticated to a member tenant to manually
+        set the central tenant and enable ECS functionality.
+        """
+        if tenant_id != getattr(self, "_ecs_central_tenant_id", None):
+            old_central_tenant = getattr(self, "_ecs_central_tenant_id", None)
+            old_ecs_consortium = getattr(self, "_ecs_consortium", None)
             current_tenant_id = self.tenant_id
-            self._clear_cached_properties("ecs_consortium", "ecs_members")
+
             try:
-                self.tenant_id = tenant_id
-                if not self.is_ecs:
+                # Set the new central tenant ID
+                self._ecs_central_tenant_id = tenant_id
+                self._clear_cached_properties("ecs_consortium", "ecs_members")
+
+                # Use folio_auth directly to avoid recursion
+                self.folio_auth.tenant_id = tenant_id
+
+                try:
+                    # Test if this is a valid ECS central tenant
+                    consortium = self.folio_get("/consortia", "consortia")[0]
+                    self._ecs_consortium = consortium
+
+                    logger.info(
+                        f"Set ECS central tenant to {tenant_id} "
+                        f"({consortium.get('name', 'unknown')})"
+                    )
+                    self._clear_cached_properties("ecs_members")
+
+                except (httpx.HTTPStatusError, IndexError) as e:
                     raise ValueError(
                         f"Tenant {tenant_id} is not an ECS central tenant, or user does"
                         " not have sufficient permissions in the central tenant."
-                    )
-                else:
-                    logger.info(
-                        f"Set ECS central tenant to {tenant_id} "
-                        f"({self.ecs_consortium.get('name', 'unknown')})"
-                    )
-                    self._clear_cached_properties("ecs_members")
-            finally:
-                self.tenant_id = current_tenant_id
+                    ) from e
+                finally:
+                    # Always restore the original tenant
+                    self.folio_auth.tenant_id = current_tenant_id
+
+            except Exception:
+                # Restore old values on error
+                self._ecs_central_tenant_id = old_central_tenant
+                if old_ecs_consortium is not None:
+                    self._ecs_consortium = old_ecs_consortium
+                elif hasattr(self, "_ecs_consortium"):
+                    delattr(self, "_ecs_consortium")
+                self._clear_cached_properties("ecs_consortium", "ecs_members")
+                raise
 
     @ecs_central_tenant_id.deleter
     def ecs_central_tenant_id(self) -> None:
@@ -754,6 +788,8 @@ class FolioClient:
         """
         Property that returns True if self.tenant_id is an ECS central tenant.
         """
+        # Ensure ECS check has been performed
+        _ = self.ecs_central_tenant_id  # This will trigger the check if needed
         return bool(self.ecs_consortium)
 
     @cached_property
@@ -761,17 +797,20 @@ class FolioClient:
         """
         Property that returns the ECS consortia for the current tenant.
         """
-        if hasattr(self, "_ecs_consortium"):
-            return self._ecs_consortium
+        # If no central tenant is set, return None
+        if not self.ecs_central_tenant_id:
+            return None
 
         current_tenant_id = self.tenant_id
-        self.tenant_id = self.ecs_central_tenant_id
+        # Use folio_auth directly to avoid recursion
+        self.folio_auth.tenant_id = self.ecs_central_tenant_id
         try:
             consortium = self.folio_get("/consortia", "consortia")[0]
         except (httpx.HTTPStatusError, IndexError):
             consortium = None
         finally:
-            self.tenant_id = current_tenant_id
+            # Use folio_auth directly to avoid recursion
+            self.folio_auth.tenant_id = current_tenant_id
         return consortium
 
     @cached_property
@@ -779,19 +818,46 @@ class FolioClient:
         """
         Property that returns the tenants of the ECS consortia.
         """
-        if self.is_ecs:
+        if self.ecs_central_tenant_id:
             current_tenant_id = self.tenant_id
-            self.tenant_id = self.ecs_central_tenant_id
-            tenants = self.folio_get(
-                f"/consortia/{self.ecs_consortium['id']}/tenants",
-                "tenants",
-                query_params={"limit": 1000},
-            )
-            tenants.sort(key=lambda x: x["id"])
-            self.tenant_id = current_tenant_id
-            return tenants
+            # Use folio_auth directly to avoid recursion
+            self.folio_auth.tenant_id = self.ecs_central_tenant_id
+            try:
+                tenants = self.folio_get(
+                    f"/consortia/{self.ecs_consortium['id']}/tenants",
+                    "tenants",
+                    query_params={"limit": 1000},
+                )
+                tenants.sort(key=lambda x: x["id"])
+                return tenants
+            finally:
+                # Use folio_auth directly to avoid recursion
+                self.folio_auth.tenant_id = current_tenant_id
         else:
             return []
+
+    def _get_ecs_tenant_name_by_id(self, tenant_id: str) -> str:
+        """
+        Helper method that returns the name of an ECS tenant given its ID.
+        Only works if ECS is already initialized to avoid recursion.
+        """
+        # Only try to get tenant names if we're already initialized as ECS
+        # and have consortium info - this avoids recursion
+        if (hasattr(self, "_ecs_central_tenant_id") and
+            self._ecs_central_tenant_id and
+            hasattr(self, "_ecs_consortium") and
+            self._ecs_consortium):
+            try:
+                # Check if ecs_members is already cached to avoid triggering recursion
+                if hasattr(self, "_ecs_members"):
+                    member_map = {t["id"]: t["name"] for t in self._ecs_members}
+                    return member_map.get(tenant_id, "unknown")
+                else:
+                    # If members aren't cached yet, just return unknown to avoid recursion
+                    return "unknown"
+            except Exception:
+                return "unknown"
+        return "unknown"
 
     @property
     def okapi_token_expires(self):
@@ -1249,7 +1315,7 @@ class FolioClient:
             auth=self.folio_auth,
         )
 
-    def get_async_folio_http_client(self):
+    def get_folio_http_client_async(self):
         """Returns an async httpx client for use in FOLIO communication"""
         return httpx.AsyncClient(
             timeout=self.http_timeout,
@@ -1468,7 +1534,7 @@ class FolioClient:
         url = f"/users/{user['id']}"
         print(url)
         try:
-            req = self.folio_put(url, user)
+            _ = self.folio_put(url, user)
         except httpx.HTTPStatusError as exc:
             print(f"Error updating user {user['username']}: {exc}")
             raise
