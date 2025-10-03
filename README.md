@@ -196,7 +196,7 @@ async with fc.get_folio_http_client_async() as client:
 The pre-configured clients include:
 - ✅ **Automatic authentication** with cookie-based sessions
 - ✅ **Retry logic** for transient authorization errors  
-- ✅ **Proper FOLIO headers** (tenant, content-type, user-agent)
+- ✅ **Proper FOLIO headers** (tenant, content-type)
 - ✅ **Base URL configuration** - just use relative paths
 - ✅ **SSL verification** settings from your FolioClient instance
 
@@ -227,7 +227,7 @@ async def fetch_with_aiohttp():
 instances = asyncio.run(fetch_with_aiohttp())
 ```
 
-### 🏛️ **Enhanced ECS (Consortial) Support**
+### 🌐 **Enhanced ECS (Consortial) Support**
 FolioClient v1.0.0 provides improved support for FOLIO ECS (consortial) environments:
 
 ```Python
