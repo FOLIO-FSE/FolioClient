@@ -292,26 +292,6 @@ def test_handles_auth_environment_variables(_):
     assert result == internal_fn.return_value
 
 
-class MockFolioClient:
-    """Mock FolioClient for testing the decorator"""
-    
-    def __init__(self):
-        self.httpx_client = Mock()
-        self.httpx_async_client = AsyncMock()
-        self.http_timeout = 30
-        self.ssl_verify = True
-        self.gateway_url = "https://test.folio.org"
-        self.folio_auth = Mock()
-        
-    def setup_sync_client(self):
-        """Setup a mock sync client"""
-        self.httpx_client = Mock()
-        self.httpx_client.is_closed = False
-        
-    def setup_async_client(self):
-        """Setup a mock async client"""
-        self.httpx_async_client = AsyncMock()
-        self.httpx_async_client.is_closed = False
 
 class MockFolioClient:
     """Mock FolioClient for testing the decorator"""
