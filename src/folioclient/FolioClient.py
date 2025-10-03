@@ -995,7 +995,7 @@ class FolioClient:
             limit (int): The maximum number of records to fetch in each chunk.
             **kwargs: Additional URL parameters to pass to `path`.
         """
-        if SORTBY_ID in query:
+        if not query or SORTBY_ID in query:
             return self._folio_get_all_by_id_offset(path, key, query, limit, **kwargs)
         else:
             return self._folio_get_all(path, key, query, limit, **kwargs)
@@ -1070,7 +1070,7 @@ class FolioClient:
             limit (int): The maximum number of records to fetch in each chunk.
             **kwargs: Additional URL parameters to pass to `path`.
         """
-        if SORTBY_ID in query or not query:
+        if not query or SORTBY_ID in query:
             return self._folio_get_all_by_id_offset_async(path, key, query, limit, **kwargs)
         else:
             return self._folio_get_all_async(path, key, query, limit, **kwargs)
