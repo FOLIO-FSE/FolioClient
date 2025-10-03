@@ -169,9 +169,7 @@ class FolioClient:
                 f"FolioClient for ECS central tenant {self._ecs_central_tenant_id}"
                 f" (active tenant: {self.tenant_id}) at {self.gateway_url} as {self.username}"
             )
-        return (
-            f"FolioClient for tenant {self.tenant_id} at {self.gateway_url} as {self.username}"
-        )
+        return f"FolioClient for tenant {self.tenant_id} at {self.gateway_url} as {self.username}"
 
     def __enter__(self):
         """Context manager for FolioClient"""
@@ -308,7 +306,8 @@ class FolioClient:
     def username(self) -> str:
         """The username used for authentication.
 
-        This is a convenience property that returns the username from the FolioConnectionParameters.
+        This is a convenience property that returns the username from the
+        FolioConnectionParameters.
         """
         return self.folio_parameters.username
 
@@ -316,7 +315,8 @@ class FolioClient:
     def password(self) -> str:
         """The password used for authentication.
 
-        This is a convenience property that returns the password from the FolioConnectionParameters.
+        This is a convenience property that returns the password from the
+        FolioConnectionParameters.
         """
         return self.folio_parameters.password
 
@@ -324,7 +324,8 @@ class FolioClient:
     def initial_tenant_id(self) -> str:
         """The initial tenant ID used for authentication.
 
-        This is a convenience property that returns the initial tenant ID from the FolioConnectionParameters.
+        This is a convenience property that returns the initial tenant ID from the
+        FolioConnectionParameters.
         """
         return self.folio_parameters.tenant_id
 
@@ -332,7 +333,8 @@ class FolioClient:
     def gateway_url(self) -> str:
         """The gateway URL used for authentication.
 
-        This is a convenience property that returns the gateway URL from the FolioConnectionParameters.
+        This is a convenience property that returns the gateway URL from the
+        FolioConnectionParameters.
         """
         return self.folio_parameters.gateway_url
 
@@ -340,7 +342,8 @@ class FolioClient:
     def ssl_verify(self) -> bool:
         """Whether SSL verification is enabled [DEPRECATED].
 
-        This is a convenience property that returns the ssl_verify value from the FolioConnectionParameters.
+        This is a convenience property that returns the ssl_verify value from the
+        FolioConnectionParameters.
         """
         warn(
             "FolioClient.ssl_verify is deprecated and will be removed in a future release.",
@@ -353,7 +356,8 @@ class FolioClient:
     def http_timeout(self) -> int | None:
         """The HTTP timeout value.
 
-        This is a convenience property that returns the timeout value from the FolioConnectionParameters.
+        This is a convenience property that returns the timeout value from the
+        FolioConnectionParameters.
         """
         return self.folio_parameters.timeout
 
@@ -918,7 +922,8 @@ class FolioClient:
         Property that returns the expiration time of the current access token.
 
         .. deprecated::
-           Use :attr:`access_token_expires` instead. This property will be removed in a future release.
+           Use :attr:`access_token_expires` instead. This property will be removed in a future
+           release.
         """
         warn(
             "FolioClient.folio_token_expires is deprecated. Use access_token_expires instead.",
