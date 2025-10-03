@@ -607,13 +607,11 @@ class FolioClient:
             "x-okapi-token": self.okapi_token,
             "x-okapi-tenant": self.tenant_id,
         }
-        if self._folio_headers:
-            self._folio_headers.update(headers)
-        else:
+        if not self._folio_headers:
             self._folio_headers = FolioHeadersDict(self)
             self._folio_headers.update(self.base_headers)
-            self._folio_headers.update(headers)
-        return self._folio_headers
+        folio_headers = {**self._folio_headers, **headers}
+        return folio_headers
 
     @folio_headers.setter
     def folio_headers(self, headers_dict: Dict[str, str]) -> None:
