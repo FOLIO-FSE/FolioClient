@@ -605,6 +605,7 @@ class FolioClient:
 
         headers = {
             "x-okapi-token": self.okapi_token,
+            "x-okapi-tenant": self.tenant_id,
         }
         if self._folio_headers:
             self._folio_headers.update(headers)
