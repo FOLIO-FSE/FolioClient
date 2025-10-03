@@ -3,9 +3,9 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from datetime import timezone as tz
-from typing import Any, Dict, List, Union
+from typing import Any, AsyncGenerator, Dict, Generator, List, Union
 from urllib.parse import urljoin
 from warnings import warn
 
@@ -21,8 +21,8 @@ from folioclient.decorators import (
     folio_retry_on_auth_error,
     folio_retry_on_server_error,
     handle_remote_protocol_error,
-    use_client_session_with_generator,
     use_client_session,
+    use_client_session_with_generator,
 )
 from folioclient.exceptions import FolioClientClosed
 
@@ -51,7 +51,7 @@ class FolioHeadersDict(dict):
         super().__init__(*args, **kwargs)
         self._folio_client = folio_client
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: str, value: str) -> None:
         if key == "x-okapi-tenant":
             warn(
                 "Setting x-okapi-tenant via headers is deprecated. "
@@ -67,7 +67,7 @@ class FolioHeadersDict(dict):
         # For all other headers, store normally
         super().__setitem__(key, value)
 
-    def update(self, other):
+    def update(self, other: Dict[str, str] = None) -> None:
         """Override update to handle x-okapi-tenant specially"""
         if isinstance(other, dict) and "x-okapi-tenant" in other:
             # Handle x-okapi-tenant specially
@@ -121,13 +121,13 @@ class FolioClient:
 
     def __init__(
         self,
-        gateway_url,
-        tenant_id,
-        username,
-        password,
+        gateway_url: str,
+        tenant_id: str,
+        username: str,
+        password: str,
         *,
-        ssl_verify=True,
-        okapi_url=None,
+        ssl_verify: bool = True,
+        okapi_url: str = None,
     ):
         if okapi_url:
             warn(
@@ -153,18 +153,25 @@ class FolioClient:
             timeout=HTTPX_TIMEOUT,
         )
         self.folio_auth: FolioAuth = FolioAuth(self.folio_parameters)
-        self.httpx_client = None
-        self.async_httpx_client = None
+        self.httpx_client: httpx.Client | None = None
+        self.async_httpx_client: httpx.AsyncClient | None = None
         self.base_headers = {
             "content-type": CONTENT_TYPE_JSON,
         }
-        self._folio_headers = FolioHeadersDict(self)
+        self._folio_headers: FolioHeadersDict = FolioHeadersDict(self)
         self.is_closed = False
-        self._ecs_central_tenant_id = None
+        self._ecs_central_tenant_id: str | None = None
         self._ecs_checked = False
 
     def __repr__(self) -> str:
-        return f"FolioClient for tenant {self.tenant_id} at {self.gateway_url} as {self.username}"
+        if self.is_ecs:
+            return (
+                f"FolioClient for ECS central tenant {self._ecs_central_tenant_id}"
+                f" (active tenant: {self.tenant_id}) at {self.gateway_url} as {self.username}"
+            )
+        return (
+            f"FolioClient for tenant {self.tenant_id} at {self.gateway_url} as {self.username}"
+        )
 
     def __enter__(self):
         """Context manager for FolioClient"""
@@ -242,7 +249,7 @@ class FolioClient:
             self.folio_auth._params = None
 
     @property
-    def okapi_url(self):
+    def okapi_url(self) -> str:
         """
         Convenience property for backwards-compatibility with tools built for
         pre-Sunflower FOLIO systems.
@@ -255,7 +262,7 @@ class FolioClient:
         return self.gateway_url
 
     @okapi_url.setter
-    def okapi_url(self, okapi_url):
+    def okapi_url(self, okapi_url: str) -> None:
         """
         Setter for okapi_url property, to maintain backwards compatibility.
         """
@@ -277,18 +284,18 @@ class FolioClient:
         await self.__aexit__(None, None, None)
 
     @property
-    def tenant_id(self):
+    def tenant_id(self) -> str:
         return self.folio_auth.tenant_id
 
     @tenant_id.setter
-    def tenant_id(self, tenant_id):
+    def tenant_id(self, tenant_id: str) -> None:
         if self.is_ecs:
             tenant_map = {t["id"]: t["name"] for t in self.ecs_members}
             logger.info(
                 f"Setting active tenant to {tenant_id} ({tenant_map.get(tenant_id, 'unknown')})"
-            )  # noqa: E501
+            )
         else:
-            logger.info(f"Setting active tenant to {tenant_id}")
+            logger.debug(f"Setting active tenant to {tenant_id}")
         self.folio_auth.tenant_id = tenant_id
         self._clear_cached_properties()
 
@@ -298,30 +305,59 @@ class FolioClient:
         self._clear_cached_properties()
 
     @property
-    def username(self):
+    def username(self) -> str:
+        """The username used for authentication.
+
+        This is a convenience property that returns the username from the FolioConnectionParameters.
+        """
         return self.folio_parameters.username
 
     @property
-    def password(self):
+    def password(self) -> str:
+        """The password used for authentication.
+
+        This is a convenience property that returns the password from the FolioConnectionParameters.
+        """
         return self.folio_parameters.password
 
     @property
-    def initial_tenant_id(self):
+    def initial_tenant_id(self) -> str:
+        """The initial tenant ID used for authentication.
+
+        This is a convenience property that returns the initial tenant ID from the FolioConnectionParameters.
+        """
         return self.folio_parameters.tenant_id
 
     @property
-    def gateway_url(self):
+    def gateway_url(self) -> str:
+        """The gateway URL used for authentication.
+
+        This is a convenience property that returns the gateway URL from the FolioConnectionParameters.
+        """
         return self.folio_parameters.gateway_url
 
     @property
-    def ssl_verify(self):
+    def ssl_verify(self) -> bool:
+        """Whether SSL verification is enabled [DEPRECATED].
+
+        This is a convenience property that returns the ssl_verify value from the FolioConnectionParameters.
+        """
+        warn(
+            "FolioClient.ssl_verify is deprecated and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.folio_parameters.ssl_verify
 
     @property
-    def http_timeout(self):
+    def http_timeout(self) -> int | None:
+        """The HTTP timeout value.
+
+        This is a convenience property that returns the timeout value from the FolioConnectionParameters.
+        """
         return self.folio_parameters.timeout
 
-    def _clear_cached_properties(self, *property_names):
+    def _clear_cached_properties(self, *property_names: str) -> None:
         """Clear cached properties specified or all cached properties if none are specified."""
 
         # Get the properties to clear
@@ -337,7 +373,7 @@ class FolioClient:
         for prop_name in props_to_clear:
             self._clear_single_cached_property(prop_name)
 
-    def _is_cached_property(self, attr_name):
+    def _is_cached_property(self, attr_name: str) -> bool:
         """Check if an attribute is a cached_property"""
         try:
             attr = getattr(self.__class__, attr_name)
@@ -352,11 +388,10 @@ class FolioClient:
             delattr(self, cached_attr_name)
 
     @cached_property
-    def current_user(self):
+    def current_user(self) -> str:
         """
         This method returns the current user id for the user that is logged in, based on username.
-        self.tenant_id is always used as x-okapi-tenant header, and is reset to any existing value
-        after the call.
+        For ECS environments, the initial tenant_id used for authentication is used.
         """
         logger.info("fetching current user..")
         current_tenant_id = self.tenant_id
@@ -391,11 +426,12 @@ class FolioClient:
             self.tenant_id = current_tenant_id
 
     @cached_property
-    def identifier_types(self):
+    def identifier_types(self) -> List[Dict[str, Any]]:
+        """Returns a list of identifier types."""
         return list(self.folio_get_all("/identifier-types", "identifierTypes", self.cql_all, 1000))
 
     @cached_property
-    def module_versions(self):
+    def module_versions(self) -> List[str]:
         """Returns a list of module versions for the current tenant."""
         try:
             resp = self.folio_get(f"/_/proxy/tenants/{self.tenant_id}/modules")
@@ -408,7 +444,7 @@ class FolioClient:
         return [a["id"] for a in resp]
 
     @cached_property
-    def statistical_codes(self):
+    def statistical_codes(self) -> List[Dict[str, Any]]:
         """
         Returns a list of statistical codes.
         """
@@ -417,13 +453,15 @@ class FolioClient:
         )
 
     @cached_property
-    def contributor_types(self):
+    def contributor_types(self) -> List[Dict[str, Any]]:
+        """Returns a list of contributor types."""
         return list(
             self.folio_get_all("/contributor-types", "contributorTypes", self.cql_all, 1000)
         )
 
     @cached_property
-    def contrib_name_types(self):
+    def contrib_name_types(self) -> List[Dict[str, Any]]:
+        """Returns a list of contributor name types."""
         return list(
             self.folio_get_all(
                 "/contributor-name-types", "contributorNameTypes", self.cql_all, 1000
@@ -431,15 +469,18 @@ class FolioClient:
         )
 
     @cached_property
-    def instance_types(self):
+    def instance_types(self) -> List[Dict[str, Any]]:
+        """Returns a list of instance types."""
         return list(self.folio_get_all("/instance-types", "instanceTypes", self.cql_all, 1000))
 
     @cached_property
-    def instance_formats(self):
+    def instance_formats(self) -> List[Dict[str, Any]]:
+        """Returns a list of instance formats."""
         return list(self.folio_get_all("/instance-formats", "instanceFormats", self.cql_all, 1000))
 
     @cached_property
-    def alt_title_types(self):
+    def alt_title_types(self) -> List[Dict[str, Any]]:
+        """Returns a list of alternative title types."""
         return list(
             self.folio_get_all(
                 "/alternative-title-types", "alternativeTitleTypes", self.cql_all, 1000
@@ -447,11 +488,13 @@ class FolioClient:
         )
 
     @cached_property
-    def locations(self):
+    def locations(self) -> List[Dict[str, Any]]:
+        """Returns a list of locations."""
         return list(self.folio_get_all("/locations", "locations", self.cql_all, 1000))
 
     @cached_property
-    def electronic_access_relationships(self):
+    def electronic_access_relationships(self) -> List[Dict[str, Any]]:
+        """Returns a list of electronic access relationships."""
         return list(
             self.folio_get_all(
                 "/electronic-access-relationships",
@@ -462,19 +505,22 @@ class FolioClient:
         )
 
     @cached_property
-    def instance_note_types(self):
+    def instance_note_types(self) -> List[Dict[str, Any]]:
+        """Returns a list of instance note types."""
         return list(
             self.folio_get_all("/instance-note-types", "instanceNoteTypes", self.cql_all, 1000)
         )
 
     @cached_property
-    def class_types(self):
+    def class_types(self) -> List[Dict[str, Any]]:
+        """Returns a list of classification types."""
         return list(
             self.folio_get_all("/classification-types", "classificationTypes", self.cql_all, 1000)
         )
 
     @cached_property
-    def organizations(self):
+    def organizations(self) -> List[Dict[str, Any]]:
+        """Returns a list of organizations."""
         return list(
             self.folio_get_all(
                 "/organizations-storage/organizations",
@@ -485,27 +531,31 @@ class FolioClient:
         )
 
     @cached_property
-    def holding_note_types(self):
+    def holding_note_types(self) -> List[Dict[str, Any]]:
+        """Returns a list of holding note types."""
         return list(
             self.folio_get_all("/holdings-note-types", "holdingsNoteTypes", self.cql_all, 1000)
         )
 
     @cached_property
-    def call_number_types(self):
+    def call_number_types(self) -> List[Dict[str, Any]]:
+        """Returns a list of call number types."""
         return list(
             self.folio_get_all("/call-number-types", "callNumberTypes", self.cql_all, 1000)
         )
 
     @cached_property
-    def holdings_types(self):
+    def holdings_types(self) -> List[Dict[str, Any]]:
+        """Returns a list of holdings types."""
         return list(self.folio_get_all("/holdings-types", "holdingsTypes", self.cql_all, 1000))
 
     @cached_property
-    def modes_of_issuance(self):
+    def modes_of_issuance(self) -> List[Dict[str, Any]]:
+        """Returns a list of modes of issuance."""
         return list(self.folio_get_all("/modes-of-issuance", "issuanceModes", self.cql_all, 1000))
 
     @cached_property
-    def authority_source_files(self):
+    def authority_source_files(self) -> List[Dict[str, Any]]:
         """Cached property for all configured authority source files"""
         return list(
             self.folio_get_all(
@@ -514,7 +564,7 @@ class FolioClient:
         )
 
     @cached_property
-    def subject_types(self):
+    def subject_types(self) -> List[Dict[str, Any]]:
         """Cached property for all configured subject types"""
         return list(self.folio_get_all("/subject-types", "subjectTypes", self.cql_all, 1000))
 
@@ -663,6 +713,21 @@ class FolioClient:
         Returns:
             str: The Okapi token.
         """
+        warn(
+            "FolioClient.okapi_token is deprecated. Use FolioClient.access_token instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.access_token
+
+    @property
+    def access_token(self) -> str:
+        """
+        Property that attempts to return a valid access token, refreshing if needed.
+
+        Returns:
+            str: The access token.
+        """
         if not self.is_closed:
             return self.folio_auth.folio_auth_token
         else:
@@ -679,7 +744,7 @@ class FolioClient:
     @property
     def cookies(self) -> CookieTypes:
         """
-        Property that returns the cookies for the current session, and
+        Property that returns the httpx cookies object for the current session, and
         refreshes them if needed. Raises FolioClientClosed if the client is closed.
         """
         if not self.is_closed and self.folio_auth._token:
@@ -696,7 +761,9 @@ class FolioClient:
         try:
             try:
                 self._ecs_consortium = self.folio_get("/consortia", "consortia")[0]
-                self._ecs_members = self.folio_get(f"/consortia/{self._ecs_consortium['id']}/tenants", "tenants")
+                self._ecs_members = self.folio_get(
+                    f"/consortia/{self._ecs_consortium['id']}/tenants", "tenants"
+                )
                 tenant_name_map = {t["id"]: t["name"] for t in self._ecs_members}
                 self._ecs_central_tenant_id = self.folio_parameters.tenant_id
                 logger.info(
@@ -704,7 +771,7 @@ class FolioClient:
                     f" ({tenant_name_map.get(self.folio_parameters.tenant_id, 'unknown')})"
                 )
             except (httpx.HTTPError, IndexError):
-                logger.info(
+                logger.debug(
                     f"Provided tenant_id ({self.folio_parameters.tenant_id}) is not an ECS "
                     "central tenant or user is not authorized to access mod-consortia APIs"
                 )
@@ -714,7 +781,7 @@ class FolioClient:
             self._ecs_checked = True
 
     @property
-    def ecs_central_tenant_id(self):
+    def ecs_central_tenant_id(self) -> str | None:
         """
         Property that returns the central tenant ID for an ECS FOLIO system
         """
@@ -724,6 +791,8 @@ class FolioClient:
 
         if hasattr(self, "_ecs_central_tenant_id") and self._ecs_central_tenant_id:
             return self._ecs_central_tenant_id
+        else:
+            logger.debug("No ECS central tenant configured")
         return None
 
     @ecs_central_tenant_id.setter
@@ -786,7 +855,7 @@ class FolioClient:
     @property
     def is_ecs(self) -> bool:
         """
-        Property that returns True if self.tenant_id is an ECS central tenant.
+        Property that returns True if self.ecs_central_tenant_id is an ECS central tenant.
         """
         # Ensure ECS check has been performed
         _ = self.ecs_central_tenant_id  # This will trigger the check if needed
@@ -795,7 +864,7 @@ class FolioClient:
     @cached_property
     def ecs_consortium(self) -> Union[Dict[str, Any], None]:
         """
-        Property that returns the ECS consortia for the current tenant.
+        Property that returns the ECS consortia object for the current tenant.
         """
         # If no central tenant is set, return None
         if not self.ecs_central_tenant_id:
@@ -816,7 +885,7 @@ class FolioClient:
     @cached_property
     def ecs_members(self) -> List[Dict[str, Any]]:
         """
-        Property that returns the tenants of the ECS consortia.
+        Property that returns the list of tenant objects of the ECS consortia.
         """
         if self.ecs_central_tenant_id:
             current_tenant_id = self.tenant_id
@@ -836,36 +905,35 @@ class FolioClient:
         else:
             return []
 
-    def _get_ecs_tenant_name_by_id(self, tenant_id: str) -> str:
+    @property
+    def access_token_expires(self) -> datetime:
         """
-        Helper method that returns the name of an ECS tenant given its ID.
-        Only works if ECS is already initialized to avoid recursion.
+        Property that returns the expiration time of the current access token.
         """
-        # Only try to get tenant names if we're already initialized as ECS
-        # and have consortium info - this avoids recursion
-        if (hasattr(self, "_ecs_central_tenant_id") and
-            self._ecs_central_tenant_id and
-            hasattr(self, "_ecs_consortium") and
-            self._ecs_consortium):
-            try:
-                # Check if ecs_members is already cached to avoid triggering recursion
-                if hasattr(self, "_ecs_members"):
-                    member_map = {t["id"]: t["name"] for t in self._ecs_members}
-                    return member_map.get(tenant_id, "unknown")
-                else:
-                    # If members aren't cached yet, just return unknown to avoid recursion
-                    return "unknown"
-            except Exception:
-                return "unknown"
-        return "unknown"
+        return self.folio_auth._token.expires_at
 
     @property
-    def okapi_token_expires(self):
-        return self.folio_auth._token.expires_at
+    def folio_token_expires(self) -> datetime:
+        """
+        Property that returns the expiration time of the current access token.
+
+        .. deprecated::
+           Use :attr:`access_token_expires` instead. This property will be removed in a future release.
+        """
+        warn(
+            "FolioClient.folio_token_expires is deprecated. Use access_token_expires instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.access_token_expires
 
     @folio_retry_on_server_error
     def login(self):
-        """Logs into FOLIO in order to get a new FOLIO access token"""
+        """Logs into FOLIO in order to get a new FOLIO access token (synchronous)
+
+        This method should not be necessary to call directly, as FolioClient
+        automatically handles token refresh as needed, but is provided for backwards-compatibility.
+        """
         if not self.is_closed:
             self.folio_auth._token = (
                 self.folio_auth._do_sync_auth()
@@ -875,7 +943,11 @@ class FolioClient:
 
     @folio_retry_on_server_error
     async def async_login(self):
-        """Logs into FOLIO in order to get a new FOLIO access token (async)"""
+        """Logs into FOLIO in order to get a new FOLIO access token (async)
+
+        This method should not be necessary to call directly, as FolioClient
+        automatically handles token refresh as needed, but is provided as a convenience.
+        """
         if not self.is_closed:
             self.folio_auth._token = await self.folio_auth._do_async_auth()
         else:
@@ -895,14 +967,46 @@ class FolioClient:
         else:
             raise FolioClientClosed()
 
-    def get_single_instance(self, instance_id):
-        return self.folio_get_single_object(f"inventory/instances/{instance_id}")
-
-    @use_client_session_with_generator
-    def folio_get_all(self, path, key=None, query=None, limit=10, **kwargs):
+    def folio_get_all(
+        self,
+        path: str,
+        key: str | None = None,
+        query: str | None = None,
+        limit: int = 10,
+        **kwargs,
+    ) -> Generator:
         """
         Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
         an iterable object yielding a single record at a time until all records have been returned.
+
+        Automatically uses id-based offset pagination if the query is sorted by id.
+
+        Parameters:
+            path (str): The API endpoint path.
+            key (str): The key in the JSON response that contains the array of results.
+            query (str): The query string to filter the data objects.
+            limit (int): The maximum number of records to fetch in each chunk.
+            **kwargs: Additional URL parameters to pass to `path`.
+        """
+        if SORTBY_ID in query:
+            return self._folio_get_all_by_id_offset(path, key, query, limit, **kwargs)
+        else:
+            return self._folio_get_all(path, key, query, limit, **kwargs)
+
+    @use_client_session_with_generator
+    def _folio_get_all(
+        self,
+        path: str,
+        key: str | None = None,
+        query: str | None = None,
+        limit: int = 10,
+        **kwargs,
+    ) -> Generator:
+        """
+        Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
+        an iterable object yielding a single record at a time until all records have been returned.
+
+        Automatically uses id-based offset pagination if the query is sorted by id.
 
         Parameters:
             path (str): The API endpoint path.
@@ -937,8 +1041,42 @@ class FolioClient:
             ),
         )
 
+    async def folio_get_all_async(
+        self,
+        path: str,
+        key: str | None = None,
+        query: str | None = None,
+        limit: int = 10,
+        **kwargs,
+    ) -> AsyncGenerator:
+        """
+        Asynchronously fetches ALL data objects from FOLIO matching `query` in
+        `limit`-size chunks and provides an async iterable object yielding a single
+        record at a time until all records have been returned.
+
+        Automatically uses id-based offset pagination if the query is sorted by id.
+
+        Parameters:
+            path (str): The API endpoint path.
+            key (str): The key in the JSON response that contains the array of results.
+            query (str): The query string to filter the data objects.
+            limit (int): The maximum number of records to fetch in each chunk.
+            **kwargs: Additional URL parameters to pass to `path`.
+        """
+        if SORTBY_ID in query or not query:
+            return self._folio_get_all_by_id_offset_async(path, key, query, limit, **kwargs)
+        else:
+            return self._folio_get_all_async(path, key, query, limit, **kwargs)
+
     @use_client_session_with_generator
-    async def folio_get_all_async(self, path, key=None, query=None, limit=10, **kwargs):
+    async def _folio_get_all_async(
+        self,
+        path: str,
+        key: str | None = None,
+        query: str | None = None,
+        limit: int = 10,
+        **kwargs,
+    ) -> AsyncGenerator:
         """
         Asynchronously fetches ALL data objects from FOLIO matching `query` in
         `limit`-size chunks and provides an async iterable object yielding a single
@@ -982,7 +1120,14 @@ class FolioClient:
             yield item
 
     @use_client_session_with_generator
-    def folio_get_all_by_id_offset(self, path, key=None, query=None, limit=10, **kwargs):
+    def _folio_get_all_by_id_offset(
+        self,
+        path: str,
+        key: str | None = None,
+        query: str | None = None,
+        limit: int = 10,
+        **kwargs,
+    ) -> Generator:
         """
         Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
         an iterable object yielding a single record at a time until all records have been returned.
@@ -1033,9 +1178,14 @@ class FolioClient:
         )
 
     @use_client_session_with_generator
-    async def folio_get_all_by_id_offset_async(
-        self, path, key=None, query=None, limit=10, **kwargs
-    ):
+    async def _folio_get_all_by_id_offset_async(
+        self,
+        path: str,
+        key: str | None = None,
+        query: str | None = None,
+        limit: int = 10,
+        **kwargs,
+    ) -> AsyncGenerator:
         """
         Asynchronously fetches ALL data objects from FOLIO matching `query` in
         `limit`-size chunks and provides an async iterable object yielding a single
@@ -1074,7 +1224,7 @@ class FolioClient:
                 yield item
             offset = self._get_last_id(temp_res)
 
-    def _prepare_id_offset_query(self, query):
+    def _prepare_id_offset_query(self, query: str | None) -> str:
         """Prepare and validate query for ID offset pagination"""
         if not query:
             query = "cql.allRecords=1 " + SORTBY_ID
@@ -1082,16 +1232,13 @@ class FolioClient:
             raise ValueError("FOLIO query must be sorted by ID")
         return query or " ".join((self.cql_all, SORTBY_ID))
 
-    def _yield_results_sync(self, results):
-        """Synchronously yield all results from the list"""
-        for item in results:
-            yield item
-
-    def _get_last_id(self, results):
+    def _get_last_id(self, results: List[Dict[str, Any]]) -> str | None:
         """Get the last ID from results for pagination"""
         return results[-1]["id"] if results else None
 
-    async def _fetch_next_page(self, path, key, query, limit, offset, **kwargs):
+    async def _fetch_next_page(
+        self, path: str, key: str, query: str, limit: int, offset: str, **kwargs
+    ) -> List[Dict[str, Any]]:
         """Fetch the next page of results using ID offset"""
         query_params = self._construct_query_parameters(query=query, limit=limit, **kwargs)
         query_params["query"] = f'id>"{offset}" and ' + query_params["query"]
@@ -1313,6 +1460,7 @@ class FolioClient:
             verify=self.ssl_verify,
             base_url=self.gateway_url,
             auth=self.folio_auth,
+            headers=self.base_headers,
         )
 
     def get_folio_http_client_async(self):
@@ -1322,6 +1470,7 @@ class FolioClient:
             verify=self.ssl_verify,
             base_url=self.gateway_url,
             auth=self.folio_auth,
+            headers=self.base_headers,
         )
 
     def folio_get_single_object(self, path):
