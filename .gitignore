@@ -114,3 +114,7 @@ pylock.toml
 
 # Sandbox files
 scratch_pad.ipynb
+
+# System files
+.DS_Store
+Thumbs.db
