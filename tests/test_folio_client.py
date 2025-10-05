@@ -367,7 +367,7 @@ def test_prepare_id_offset_query_handles_sortby_present(mock_ecs_check):
         mock_folio_auth.return_value = mock_auth_instance
         
         fc = FolioClient("https://example.com", "tenant", "user", "pass")
-        query = fc._prepare_id_offset_query("cql.allRecords=1 sortBy id")
+        query = fc.prepare_id_offset_query("cql.allRecords=1 sortBy id", fc.cql_all)
         assert "sortBy id" in query
 
 
@@ -378,7 +378,7 @@ def test_prepare_id_offset_query_handles_none(mock_ecs_check):
         mock_folio_auth.return_value = mock_auth_instance
         
         fc = FolioClient("https://example.com", "tenant", "user", "pass")
-        query = fc._prepare_id_offset_query(None)
+        query = fc.prepare_id_offset_query(None, fc.cql_all)
         assert query == "cql.allRecords=1 sortBy id"
 
 
@@ -403,7 +403,7 @@ def test_get_last_id_extracts_id_from_results(mock_ecs_check):
         
         fc = FolioClient("https://example.com", "tenant", "user", "pass")
         results = [{"id": "123", "name": "test"}, {"id": "456", "name": "test2"}]
-        last_id = fc._get_last_id(results)
+        last_id = fc.get_last_id(results)
         assert last_id == "456"
 
 
@@ -414,7 +414,7 @@ def test_get_last_id_returns_none_for_empty_results(mock_ecs_check):
         mock_folio_auth.return_value = mock_auth_instance
         
         fc = FolioClient("https://example.com", "tenant", "user", "pass")
-        last_id = fc._get_last_id([])
+        last_id = fc.get_last_id([])
         assert last_id is None
 
 
