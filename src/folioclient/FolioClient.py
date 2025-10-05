@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime
 from datetime import timezone as tz
-from typing import Any, AsyncGenerator, Dict, Generator, List, Self, Union
+from typing import Any, AsyncGenerator, Dict, Generator, List, Union
 from urllib.parse import urljoin
 from warnings import warn
 
@@ -171,7 +171,7 @@ class FolioClient:
         password (str): The password for authentication.
         ssl_verify (bool): Whether to verify SSL certificates. Default is True.
         okapi_url (keyword-only, str, optional): Deprecated. Use gateway_url instead.
-    """
+    """ # noqa: E501
 
     def __init__(
         self,
@@ -1989,9 +1989,7 @@ class FolioClient:
         return github_headers
 
     @staticmethod
-    def get_latest_from_github(
-        owner, repo, filepath: str, ssl_verify=True
-    ) -> Dict[str, Any]:
+    def get_latest_from_github(owner, repo, filepath: str, ssl_verify=True) -> Dict[str, Any]:
         """Fetches the latest version of a FOLIO record schema from a GitHub repository.
 
         Args:
