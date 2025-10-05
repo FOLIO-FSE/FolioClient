@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime
 from datetime import timezone as tz
-from typing import Any, AsyncGenerator, Dict, Generator, List, Union
+from typing import Any, AsyncGenerator, Dict, Generator, List, Self, Union
 from urllib.parse import urljoin
 from warnings import warn
 
@@ -27,6 +27,32 @@ from folioclient.decorators import (
     use_client_session_with_generator,
 )
 from folioclient.exceptions import FolioClientClosed
+
+# Conditional import of orjson to support faster JSON processing if available
+try:
+    import orjson
+
+    if (
+        os.environ.get("FOLIOCLIENT_PREFER_ORJSON", "0") != "0"
+    ):  # Allow user to disable orjson via env var
+        _HAS_ORJSON = True
+    else:
+        _HAS_ORJSON = False
+
+    def _orjson_loads(data):
+        return orjson.loads(data)
+
+    def _orjson_dumps(obj):  # noqa: F841
+        return orjson.dumps(obj).decode("utf-8")
+
+    # Define exception tuples for different operations
+    JSON_DECODE_ERRORS = (json.JSONDecodeError, orjson.JSONDecodeError)
+    JSON_ENCODE_ERRORS = (TypeError, orjson.JSONEncodeError)  # If you add encoding later
+
+except ImportError:
+    _HAS_ORJSON = False
+    JSON_DECODE_ERRORS = (json.JSONDecodeError,)
+    JSON_ENCODE_ERRORS = (TypeError,)
 
 # Constants
 CONTENT_TYPE_JSON = "application/json"
@@ -50,10 +76,27 @@ class FolioHeadersDict(dict):
     """Custom dict wrapper for folio_headers that intercepts x-okapi-tenant assignments"""
 
     def __init__(self, folio_client: "FolioClient", *args, **kwargs):
+        """Initialize the FolioHeadersDict with a reference to the FolioClient.
+
+        Args:
+            folio_client (FolioClient): The FolioClient instance this dict belongs to.
+            *args: Arguments to pass to the parent dict constructor.
+            **kwargs: Keyword arguments to pass to the parent dict constructor.
+        """
         super().__init__(*args, **kwargs)
         self._folio_client = folio_client
 
     def __setitem__(self, key: str, value: str) -> None:
+        """Set header value with special handling for x-okapi-tenant.
+
+        Args:
+            key (str): The header name.
+            value (str): The header value.
+
+        Note:
+            Setting x-okapi-tenant via headers is deprecated. Use
+            folio_client.tenant_id instead.
+        """
         if key == "x-okapi-tenant":
             warn(
                 "Setting x-okapi-tenant via headers is deprecated. "
@@ -70,7 +113,16 @@ class FolioHeadersDict(dict):
         super().__setitem__(key, value)
 
     def update(self, other: Dict[str, str] = None) -> None:
-        """Override update to handle x-okapi-tenant specially"""
+        """Override update to handle x-okapi-tenant specially.
+
+        Args:
+            other (Dict[str, str], optional): Dictionary of headers to update.
+                Defaults to None.
+
+        Note:
+            Setting x-okapi-tenant via headers is deprecated. Use
+            folio_client.tenant_id instead.
+        """
         if isinstance(other, dict) and "x-okapi-tenant" in other:
             # Handle x-okapi-tenant specially
             tenant_id = other["x-okapi-tenant"]  # Read-only access
@@ -119,7 +171,7 @@ class FolioClient:
         password (str): The password for authentication.
         ssl_verify (bool): Whether to verify SSL certificates. Default is True.
         okapi_url (keyword-only, str, optional): Deprecated. Use gateway_url instead.
-    """  # noqa: E501
+    """
 
     def __init__(
         self,
@@ -145,7 +197,7 @@ class FolioClient:
             )
         self.missing_location_codes = set()
         self.loan_policies = {}
-        self.cql_all = "?query=cql.allRecords=1"
+        self.cql_all = "cql.allRecords=1"
         self.folio_parameters: FolioConnectionParameters = FolioConnectionParameters(
             gateway_url=okapi_url or gateway_url,
             tenant_id=tenant_id,
@@ -166,6 +218,15 @@ class FolioClient:
         self._ecs_checked = False
 
     def __repr__(self) -> str:
+        """Return string representation of the FolioClient instance.
+
+        Returns:
+            str: String representation showing tenant, URL, and username info.
+
+        Note:
+            For ECS environments, the central tenant ID is also shown, as well as the
+            active tenant ID
+        """
         if self.is_ecs:
             return (
                 f"FolioClient for ECS central tenant {self._ecs_central_tenant_id}"
@@ -174,9 +235,16 @@ class FolioClient:
         return f"FolioClient for tenant {self.tenant_id} at {self.gateway_url} as {self.username}"
 
     def __enter__(self):
-        """Context manager for FolioClient"""
+        """Context manager entry for FolioClient.
+
+        Returns:
+            FolioClient: The FolioClient instance.
+
+        Note:
+            Instantiates httpx.Client instance for FOLIO using `self.get_folio_http_client()`
+            and performs initial ECS check.
+        """
         self.httpx_client = self.get_folio_http_client()
-        self.async_httpx_client = self.get_folio_http_client_async()
         # Call ECS check after clients are initialized
         self._initial_ecs_check()
         return self
@@ -184,7 +252,17 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     def __exit__(self, exc_type, exc_value, traceback):
-        """Context manager exit method"""
+        """Context manager exit method.
+
+        Args:
+            exc_type: Exception type if an exception occurred.
+            exc_value: Exception value if an exception occurred.
+            traceback: Traceback if an exception occurred.
+
+        Note:
+            This method logs out of FOLIO for the current session, invalidates any
+            existing startup parameters, and marks the FolioClient instance as closed.
+        """
         if self.cookies:
             logger.info("logging out...")
             logout = self.httpx_client.post(
@@ -210,15 +288,30 @@ class FolioClient:
             self.folio_auth._params = None
 
     async def __aenter__(self):
-        """Asynchronous context manager for FolioClient"""
+        """Asynchronous context manager entry for FolioClient.
+
+        Returns:
+            FolioClient: The FolioClient instance.
+
+        Note:
+            Instantiates httpx.Client and httpx.AsyncClient instance for FOLIO using
+            `self.get_folio_http_client()` and `self.get_folio_http_client_async()`,
+            and performs initial ECS check.
+        """
         self.httpx_client = self.get_folio_http_client()
         self.async_httpx_client = self.get_folio_http_client_async()
         # Call ECS check after clients are initialized
         self._initial_ecs_check()
         return self
 
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        """Asynchronous context manager exit method"""
+    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+        """Asynchronous context manager exit method.
+
+        Args:
+            exc_type: Exception type if an exception occurred.
+            exc_value: Exception value if an exception occurred.
+            traceback: Traceback if an exception occurred.
+        """
         if self.cookies:
             logger.info("logging out...")
             logout = await self.async_httpx_client.post(
@@ -250,9 +343,13 @@ class FolioClient:
 
     @property
     def okapi_url(self) -> str:
-        """
-        Convenience property for backwards-compatibility with tools built for
-        pre-Sunflower FOLIO systems.
+        """Convenience property for backwards-compatibility with pre-Sunflower FOLIO systems.
+
+        Note:
+            This property is deprecated. Use gateway_url instead.
+
+        Returns:
+            str: The gateway URL.
         """
         warn(
             "FolioClient.okapi_url is deprecated. Use gateway_url instead.",
@@ -263,8 +360,13 @@ class FolioClient:
 
     @okapi_url.setter
     def okapi_url(self, okapi_url: str) -> None:
-        """
-        Setter for okapi_url property, to maintain backwards compatibility.
+        """Setter for okapi_url property, to maintain backwards compatibility.
+
+        Note:
+            This property is deprecated. Use gateway_url instead.
+
+        Args:
+            okapi_url (str): The URL to set as the gateway URL.
         """
         warn(
             "FolioClient.okapi_url is deprecated. Use gateway_url instead.",
@@ -273,13 +375,17 @@ class FolioClient:
         )
         self.gateway_url = okapi_url
 
-    def close(self):
+    def close(self) -> None:
+        """Manually close the FolioClient object.
+
+        This should only be used when running FolioClient outside a context manager.
+        """
         self.__exit__(None, None, None)
 
-    async def async_close(self):
-        """Manually close the FolioClient object
+    async def async_close(self) -> None:
+        """Manually close the FolioClient object asynchronously.
 
-        This should only be used when running FolioClient outside a context manager
+        This should only be used when running FolioClient outside a context manager.
         """
         await self.__aexit__(None, None, None)
 
@@ -300,7 +406,8 @@ class FolioClient:
         self._clear_cached_properties()
 
     @tenant_id.deleter
-    def tenant_id(self):
+    def tenant_id(self) -> None:
+        """Reset tenant_id to the initial value and clear cached properties."""
         self.folio_auth.reset_tenant_id()
         self._clear_cached_properties()
 
@@ -364,7 +471,12 @@ class FolioClient:
         return self.folio_parameters.timeout
 
     def _clear_cached_properties(self, *property_names: str) -> None:
-        """Clear cached properties specified or all cached properties if none are specified."""
+        """Clear cached properties specified or all cached properties if none specified.
+
+        Args:
+            *property_names (str): Names of specific properties to clear. If none
+                provided, all cached properties will be cleared.
+        """
 
         # Get the properties to clear
         if property_names:
@@ -380,24 +492,41 @@ class FolioClient:
             self._clear_single_cached_property(prop_name)
 
     def _is_cached_property(self, attr_name: str) -> bool:
-        """Check if an attribute is a cached_property"""
+        """Check if an attribute is a cached_property.
+
+        Args:
+            attr_name (str): Name of the attribute to check.
+
+        Returns:
+            bool: True if the attribute is a cached_property, False otherwise.
+        """
         try:
             attr = getattr(self.__class__, attr_name)
             return isinstance(attr, cached_property)
         except AttributeError:
             return False
 
-    def _clear_single_cached_property(self, prop_name):
-        """Clear a single cached property if it exists"""
+    def _clear_single_cached_property(self, prop_name) -> None:
+        """Clear a single cached property if it exists.
+
+        Args:
+            prop_name (str): Name of the property to clear.
+        """
         cached_attr_name = f"_{prop_name}"
         if hasattr(self, cached_attr_name):
             delattr(self, cached_attr_name)
 
     @cached_property
     def current_user(self) -> str:
-        """
-        This method returns the current user id for the user that is logged in, based on username.
-        For ECS environments, the initial tenant_id used for authentication is used.
+        """Returns the current user ID for the logged-in user.
+
+        First tries the bl-users endpoint, then falls back to the users endpoint.
+
+        Returns:
+            str: The user ID of the current user, or empty string if unable to fetch.
+
+        Note:
+            For ECS environments, the initial tenant_id used for authentication is used.
         """
         logger.info("fetching current user..")
         current_tenant_id = self.tenant_id
@@ -433,12 +562,20 @@ class FolioClient:
 
     @cached_property
     def identifier_types(self) -> List[Dict[str, Any]]:
-        """Returns a list of identifier types."""
+        """Returns a list of identifier types.
+
+        Returns:
+            List[Dict[str, Any]]: List of identifier type objects.
+        """
         return list(self.folio_get_all("/identifier-types", "identifierTypes", self.cql_all, 1000))
 
     @cached_property
     def module_versions(self) -> List[str]:
-        """Returns a list of module versions for the current tenant."""
+        """Returns a list of module versions for the current tenant.
+
+        Returns:
+            List[str]: List of module version IDs.
+        """
         try:
             resp = self.folio_get(f"/_/proxy/tenants/{self.tenant_id}/modules")
         except httpx.HTTPError:
@@ -451,8 +588,10 @@ class FolioClient:
 
     @cached_property
     def statistical_codes(self) -> List[Dict[str, Any]]:
-        """
-        Returns a list of statistical codes.
+        """Returns a list of statistical codes.
+
+        Returns:
+            List[Dict[str, Any]]: List of statistical code objects.
         """
         return list(
             self.folio_get_all("/statistical-codes", "statisticalCodes", self.cql_all, 1000)
@@ -460,14 +599,22 @@ class FolioClient:
 
     @cached_property
     def contributor_types(self) -> List[Dict[str, Any]]:
-        """Returns a list of contributor types."""
+        """Returns a list of contributor types.
+
+        Returns:
+            List[Dict[str, Any]]: List of contributor type objects.
+        """
         return list(
             self.folio_get_all("/contributor-types", "contributorTypes", self.cql_all, 1000)
         )
 
     @cached_property
     def contrib_name_types(self) -> List[Dict[str, Any]]:
-        """Returns a list of contributor name types."""
+        """Returns a list of contributor name types.
+
+        Returns:
+            List[Dict[str, Any]]: List of contributor name type objects.
+        """
         return list(
             self.folio_get_all(
                 "/contributor-name-types", "contributorNameTypes", self.cql_all, 1000
@@ -476,17 +623,29 @@ class FolioClient:
 
     @cached_property
     def instance_types(self) -> List[Dict[str, Any]]:
-        """Returns a list of instance types."""
+        """Returns a list of instance types.
+
+        Returns:
+            List[Dict[str, Any]]: List of instance type objects.
+        """
         return list(self.folio_get_all("/instance-types", "instanceTypes", self.cql_all, 1000))
 
     @cached_property
     def instance_formats(self) -> List[Dict[str, Any]]:
-        """Returns a list of instance formats."""
+        """Returns a list of instance formats.
+
+        Returns:
+            List[Dict[str, Any]]: List of instance format objects.
+        """
         return list(self.folio_get_all("/instance-formats", "instanceFormats", self.cql_all, 1000))
 
     @cached_property
     def alt_title_types(self) -> List[Dict[str, Any]]:
-        """Returns a list of alternative title types."""
+        """Returns a list of alternative title types.
+
+        Returns:
+            List[Dict[str, Any]]: List of alternative title type objects.
+        """
         return list(
             self.folio_get_all(
                 "/alternative-title-types", "alternativeTitleTypes", self.cql_all, 1000
@@ -495,12 +654,20 @@ class FolioClient:
 
     @cached_property
     def locations(self) -> List[Dict[str, Any]]:
-        """Returns a list of locations."""
+        """Returns a list of locations.
+
+        Returns:
+            List[Dict[str, Any]]: List of location objects.
+        """
         return list(self.folio_get_all("/locations", "locations", self.cql_all, 1000))
 
     @cached_property
     def electronic_access_relationships(self) -> List[Dict[str, Any]]:
-        """Returns a list of electronic access relationships."""
+        """Returns a list of electronic access relationships.
+
+        Returns:
+            List[Dict[str, Any]]: List of electronic access relationship objects.
+        """
         return list(
             self.folio_get_all(
                 "/electronic-access-relationships",
@@ -512,21 +679,33 @@ class FolioClient:
 
     @cached_property
     def instance_note_types(self) -> List[Dict[str, Any]]:
-        """Returns a list of instance note types."""
+        """Returns a list of instance note types.
+
+        Returns:
+            List[Dict[str, Any]]: List of instance note type objects.
+        """
         return list(
             self.folio_get_all("/instance-note-types", "instanceNoteTypes", self.cql_all, 1000)
         )
 
     @cached_property
     def class_types(self) -> List[Dict[str, Any]]:
-        """Returns a list of classification types."""
+        """Returns a list of classification types.
+
+        Returns:
+            List[Dict[str, Any]]: List of classification type objects.
+        """
         return list(
             self.folio_get_all("/classification-types", "classificationTypes", self.cql_all, 1000)
         )
 
     @cached_property
     def organizations(self) -> List[Dict[str, Any]]:
-        """Returns a list of organizations."""
+        """Returns a list of organizations.
+
+        Returns:
+            List[Dict[str, Any]]: List of organization objects.
+        """
         return list(
             self.folio_get_all(
                 "/organizations-storage/organizations",
@@ -538,31 +717,51 @@ class FolioClient:
 
     @cached_property
     def holding_note_types(self) -> List[Dict[str, Any]]:
-        """Returns a list of holding note types."""
+        """Returns a list of holding note types.
+
+        Returns:
+            List[Dict[str, Any]]: List of holding note type objects.
+        """
         return list(
             self.folio_get_all("/holdings-note-types", "holdingsNoteTypes", self.cql_all, 1000)
         )
 
     @cached_property
     def call_number_types(self) -> List[Dict[str, Any]]:
-        """Returns a list of call number types."""
+        """Returns a list of call number types.
+
+        Returns:
+            List[Dict[str, Any]]: List of call number type objects.
+        """
         return list(
             self.folio_get_all("/call-number-types", "callNumberTypes", self.cql_all, 1000)
         )
 
     @cached_property
     def holdings_types(self) -> List[Dict[str, Any]]:
-        """Returns a list of holdings types."""
+        """Returns a list of holdings types.
+
+        Returns:
+            List[Dict[str, Any]]: List of holdings type objects.
+        """
         return list(self.folio_get_all("/holdings-types", "holdingsTypes", self.cql_all, 1000))
 
     @cached_property
     def modes_of_issuance(self) -> List[Dict[str, Any]]:
-        """Returns a list of modes of issuance."""
+        """Returns a list of modes of issuance.
+
+        Returns:
+            List[Dict[str, Any]]: List of mode of issuance objects.
+        """
         return list(self.folio_get_all("/modes-of-issuance", "issuanceModes", self.cql_all, 1000))
 
     @cached_property
     def authority_source_files(self) -> List[Dict[str, Any]]:
-        """Cached property for all configured authority source files"""
+        """Cached property for all configured authority source files.
+
+        Returns:
+            List[Dict[str, Any]]: List of authority source file objects.
+        """
         return list(
             self.folio_get_all(
                 "/authority-source-files", "authoritySourceFiles", self.cql_all, 1000
@@ -571,7 +770,11 @@ class FolioClient:
 
     @cached_property
     def subject_types(self) -> List[Dict[str, Any]]:
-        """Cached property for all configured subject types"""
+        """Cached property for all configured subject types.
+
+        Returns:
+            List[Dict[str, Any]]: List of subject type objects.
+        """
         return list(self.folio_get_all("/subject-types", "subjectTypes", self.cql_all, 1000))
 
     @property
@@ -676,15 +879,15 @@ class FolioClient:
 
     @okapi_headers.setter
     def okapi_headers(self, headers_dict: Dict[str, str]) -> None:
-        """
-        Setter for okapi_headers that allows setting custom headers while preserving
+        """Setter for okapi_headers that allows setting custom headers while preserving
         backward compatibility for x-okapi-tenant.
 
-        .. deprecated::
-           Use :attr:`folio_headers` instead. This property will be removed in a future release.
+        Note:
+            This property is deprecated. Use folio_headers instead.
+            This property will be removed in a future release.
 
-        Parameters:
-            headers_dict (Dict[str, str]): Dictionary of headers to set
+        Args:
+            headers_dict (Dict[str, str]): Dictionary of headers to set.
         """
         warn(
             "FolioClient.okapi_headers is deprecated. Use folio_headers instead. "
@@ -696,11 +899,11 @@ class FolioClient:
 
     @okapi_headers.deleter
     def okapi_headers(self) -> None:
-        """
-        Deleter for okapi_headers that clears the private _okapi_headers dictionary.
+        """Deleter for okapi_headers that clears the private _okapi_headers dictionary.
 
-        .. deprecated::
-           Use :attr:`folio_headers` instead. This property will be removed in a future release.
+        Note:
+            This property is deprecated. Use folio_headers instead.
+            This property will be removed in a future release.
         """
         warn(
             "FolioClient.okapi_headers is deprecated. Use folio_headers instead. "
@@ -758,8 +961,12 @@ class FolioClient:
         else:
             raise FolioClientClosed()
 
-    def _initial_ecs_check(self):
-        """Check if initial tenant_id value is an ecs_central_tenant_id"""
+    def _initial_ecs_check(self) -> None:
+        """Check if initial tenant_id value is an ECS central tenant ID.
+
+        Attempts to determine if this is an ECS (multi-tenant consortium) environment
+        by checking for consortia and member tenant information.
+        """
         if self._ecs_checked:
             return
 
@@ -934,11 +1141,15 @@ class FolioClient:
         return self.access_token_expires
 
     @folio_retry_on_server_error
-    def login(self):
-        """Logs into FOLIO in order to get a new FOLIO access token (synchronous)
+    def login(self) -> None:
+        """Logs into FOLIO to get a new FOLIO access token (synchronous).
 
         This method should not be necessary to call directly, as FolioClient
-        automatically handles token refresh as needed, but is provided for backwards-compatibility.
+        automatically handles token refresh as needed, but is provided for
+        backwards-compatibility.
+
+        Raises:
+            FolioClientClosed: If the client has been closed.
         """
         if not self.is_closed:
             self.folio_auth._token = (
@@ -948,30 +1159,180 @@ class FolioClient:
             raise FolioClientClosed()
 
     @folio_retry_on_server_error
-    async def async_login(self):
-        """Logs into FOLIO in order to get a new FOLIO access token (async)
+    async def async_login(self) -> None:
+        """Logs into FOLIO to get a new FOLIO access token (asynchronous).
 
         This method should not be necessary to call directly, as FolioClient
-        automatically handles token refresh as needed, but is provided as a convenience.
+        automatically handles token refresh as needed, but is provided as a
+        convenience.
+
+        Raises:
+            FolioClientClosed: If the client has been closed.
         """
         if not self.is_closed:
             self.folio_auth._token = await self.folio_auth._do_async_auth()
         else:
             raise FolioClientClosed()
 
-    def logout(self):
-        """Alias for `close`"""
+    def logout(self) -> None:
+        """Alias for close method.
+
+        Raises:
+            FolioClientClosed: If the client has already been closed.
+        """
         if not self.is_closed:
             self.close()
         else:
             raise FolioClientClosed()
 
-    async def async_logout(self):
-        """Alias for `async_close`"""
+    async def async_logout(self) -> None:
+        """Alias for async_close method.
+
+        Raises:
+            FolioClientClosed: If the client has already been closed.
+        """
         if not self.is_closed:
             await self.async_close()
         else:
             raise FolioClientClosed()
+
+    def build_url(self, path: str) -> str:
+        """Build complete URL from gateway URL and path.
+
+        Args:
+            path (str): The API endpoint path to append to the gateway URL.
+
+        Returns:
+            str: The complete URL with leading/trailing slashes normalized.
+        """
+        return urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+
+    @staticmethod
+    def handle_json_response(response) -> Any:
+        """Handle JSON response with proper error handling.
+
+        Uses orjson for faster parsing if available, otherwise falls back to
+        the standard json library.
+
+        Args:
+            response: The HTTP response object to parse.
+
+        Returns:
+            Any: The parsed JSON data, or None if parsing fails.
+        """
+        try:
+            if _HAS_ORJSON:
+                return _orjson_loads(response.content)
+            else:
+                return response.json()
+        except JSON_DECODE_ERRORS:  # Catch both JSONDecodeError types
+            return None
+
+    def extract_response_data(self, response, key: str | None) -> Any:
+        """Extract data from response, optionally using a key.
+
+        Args:
+            response: The HTTP response object to extract data from.
+            key (str | None): Optional key to extract specific data from the response.
+                If None, returns the entire JSON response.
+
+        Returns:
+            Any: The extracted data, either the full response or the value at the key.
+        """
+        json_data = self.handle_json_response(response)
+        return json_data[key] if key and json_data else json_data
+
+    @staticmethod
+    def should_continue_pagination(results: List[Dict], limit: int) -> bool:
+        """Determine if pagination should continue based on result count.
+
+        Args:
+            results (List[Dict]): The current results from the API call.
+            limit (int): The maximum number of results per page.
+
+        Returns:
+            bool: True if pagination should continue, False otherwise.
+        """
+        return len(results) == limit
+
+    @staticmethod
+    def get_last_id(results: List[Dict[str, Any]]) -> str | None:
+        """Extract last ID from results for ID-based pagination.
+
+        Args:
+            results (List[Dict[str, Any]]): List of results containing ID fields.
+
+        Returns:
+            str | None: The ID of the last result, or None if results is empty.
+        """
+        return results[-1]["id"] if results else None
+
+    @staticmethod
+    def construct_id_offset_query(base_query: str, offset: str) -> str:
+        """Construct query with ID offset for pagination.
+
+        Args:
+            base_query (str): The base CQL query string.
+            offset (str): The ID to use as an offset for pagination.
+
+        Returns:
+            str: The constructed query with ID offset condition.
+        """
+        return f'id>"{offset}" and {base_query}'
+
+    @staticmethod
+    def prepare_id_offset_query(query: str | None, cql_all: str) -> str:
+        """Prepare and validate query for ID offset pagination.
+
+        Args:
+            query (str | None): The CQL query string to validate.
+            cql_all (str): Default query to use if no query provided.
+
+        Returns:
+            str: Validated query string suitable for ID offset pagination.
+
+        Raises:
+            ValueError: If query is provided but not sorted by ID.
+        """
+        if query and SORTBY_ID not in query:
+            raise ValueError("FOLIO query must be sorted by ID")
+        return query or f"{cql_all} {SORTBY_ID}"
+
+    @staticmethod
+    def handle_delete_response(response, path: str) -> Any:
+        """Handle delete response with proper error handling and logging.
+
+        Args:
+            response: The HTTP response object from the delete request.
+            path (str): The API path that was accessed for logging purposes.
+
+        Returns:
+            Any: The response data if successful, None for 204 status.
+
+        Raises:
+            httpx.HTTPStatusError: For non-404 HTTP errors.
+        """
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            if response.status_code == 404:
+                logger.warning(f"Resource not found: {path}")
+            else:
+                raise
+
+        try:
+            if _HAS_ORJSON:
+                return _orjson_loads(response.content)
+            else:
+                return response.json()
+        except JSON_DECODE_ERRORS:  # Catch both JSONDecodeError types
+            # If the response is successful + empty, return None
+            if response.status_code == 204:
+                logger.info(f"Resource deleted: {path} ({response.status_code})")
+                return None
+            else:
+                logger.error(f"Failed to decode JSON response: {response.text}")
+                raise
 
     def folio_get_all(
         self,
@@ -979,25 +1340,41 @@ class FolioClient:
         key: str | None = None,
         query: str | None = None,
         limit: int = 10,
+        no_cql: bool = False,
         **kwargs,
-    ) -> Generator:
-        """
-        Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
-        an iterable object yielding a single record at a time until all records have been returned.
+    ) -> Generator[Dict[str, Any], None, None]:
+        """Fetches ALL data objects from FOLIO matching query in limit-size chunks.
 
-        Automatically uses id-based offset pagination if the query is sorted by id.
+        Provides an iterable object yielding a single record at a time until all
+        records have been returned. Automatically uses id-based offset pagination
+        if the query is sorted by id.
 
-        Parameters:
+        Args:
             path (str): The API endpoint path.
-            key (str): The key in the JSON response that contains the array of results.
-            query (str): The query string to filter the data objects.
+            key (str | None): The key in the JSON response that contains the array
+                of results. Defaults to None.
+            query (str | None): The query string to filter the data objects.
+                Defaults to None.
             limit (int): The maximum number of records to fetch in each chunk.
-            **kwargs: Additional URL parameters to pass to `path`.
+                Defaults to 10.
+            no_cql (bool): Whether to skip CQL query processing. Defaults to False.
+            **kwargs: Additional URL parameters to pass to the endpoint.
+
+        Yields:
+            dict: Individual records from the FOLIO API.
+
+        Example:
+            >>> for item in folio_client.folio_get_all(
+            ...     "/item-storage/items", "items", "query", limit=100
+            ... ):
+            ...     process(item)
         """
-        if not query or SORTBY_ID in query:
-            return self._folio_get_all_by_id_offset(path, key, query, limit, **kwargs)
+        if not no_cql and (not query or SORTBY_ID not in query):
+            query = self.prepare_id_offset_query(query, self.cql_all)
+            return self._folio_get_all_by_id_offset(path, key, query, limit, no_cql, **kwargs)
         else:
-            return self._folio_get_all(path, key, query, limit, **kwargs)
+            query = query or f"{self.cql_all} {SORTBY_ID}"
+            return self._folio_get_all(path, key, query, limit, no_cql, **kwargs)
 
     @use_client_session_with_generator
     def _folio_get_all(
@@ -1006,8 +1383,9 @@ class FolioClient:
         key: str | None = None,
         query: str | None = None,
         limit: int = 10,
+        no_cql: bool = False,
         **kwargs,
-    ) -> Generator:
+    ) -> Generator[Dict[str, Any], None, None]:
         """
         Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
         an iterable object yielding a single record at a time until all records have been returned.
@@ -1022,30 +1400,29 @@ class FolioClient:
             **kwargs: Additional URL parameters to pass to `path`.
         """
         offset = 0
-        query = query or " ".join((self.cql_all, SORTBY_ID))
+
+        # Initial fetch
         query_params: Dict[str, Any] = self._construct_query_parameters(
             query=query, limit=limit, offset=offset * limit, **kwargs
         )
         temp_res = self.folio_get(path, key, query_params=query_params)
         yield from temp_res
-        while len(temp_res) == limit:
+
+        # Continue fetching while we get full pages
+        while self.should_continue_pagination(temp_res, limit):
             offset += 1
-            temp_res = self.folio_get(
-                path,
-                key,
-                query_params=self._construct_query_parameters(
-                    query=query, limit=limit, offset=offset * limit, **kwargs
-                ),
-            )
-            yield from temp_res
-        offset += 1
-        yield from self.folio_get(
-            path,
-            key,
-            query_params=self._construct_query_parameters(
+            query_params = self._construct_query_parameters(
                 query=query, limit=limit, offset=offset * limit, **kwargs
-            ),
+            )
+            temp_res = self.folio_get(path, key, query_params=query_params)
+            yield from temp_res
+
+        # Final fetch (handles edge case)
+        offset += 1
+        final_query_params = self._construct_query_parameters(
+            query=query, limit=limit, offset=offset * limit, **kwargs
         )
+        yield from self.folio_get(path, key, query_params=final_query_params)
 
     async def folio_get_all_async(
         self,
@@ -1053,8 +1430,9 @@ class FolioClient:
         key: str | None = None,
         query: str | None = None,
         limit: int = 10,
+        no_cql: bool = False,
         **kwargs,
-    ) -> AsyncGenerator:
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Asynchronously fetches ALL data objects from FOLIO matching `query` in
         `limit`-size chunks and provides an async iterable object yielding a single
@@ -1065,14 +1443,31 @@ class FolioClient:
         Parameters:
             path (str): The API endpoint path.
             key (str): The key in the JSON response that contains the array of results.
-            query (str): The query string to filter the data objects.
-            limit (int): The maximum number of records to fetch in each chunk.
+            query (str): The query string to filter the data objects, default is None.
+            limit (int): The maximum number of records to fetch in each chunk, default is 10.
+            no_cql (bool): If True, disables CQL query processing, default is False.
             **kwargs: Additional URL parameters to pass to `path`.
+
+        Yields:
+            dict: Individual records from the FOLIO API.
+
+        Example:
+            >>> async for item in folio_client.folio_get_all_async(
+            ...     "/path/to/resource", "key", "query", limit=100
+            ... ):
+            ...     process(item)
+
         """
-        if not query or SORTBY_ID in query:
-            return self._folio_get_all_by_id_offset_async(path, key, query, limit, **kwargs)
+        if not no_cql and (not query or SORTBY_ID not in query):
+            query = self.prepare_id_offset_query(query, self.cql_all)
+            async for item in self._folio_get_all_by_id_offset_async(
+                path, key, query, limit, no_cql, **kwargs
+            ):
+                yield item
         else:
-            return self._folio_get_all_async(path, key, query, limit, **kwargs)
+            query = query or f"{self.cql_all} {SORTBY_ID}"
+            async for item in self._folio_get_all_async(path, key, query, limit, no_cql, **kwargs):
+                yield item
 
     @use_client_session_with_generator
     async def _folio_get_all_async(
@@ -1081,8 +1476,9 @@ class FolioClient:
         key: str | None = None,
         query: str | None = None,
         limit: int = 10,
+        no_cql: bool = False,
         **kwargs,
-    ) -> AsyncGenerator:
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Asynchronously fetches ALL data objects from FOLIO matching `query` in
         `limit`-size chunks and provides an async iterable object yielding a single
@@ -1096,32 +1492,31 @@ class FolioClient:
             **kwargs: Additional URL parameters to pass to `path`.
         """
         offset = 0
-        query = query or " ".join((self.cql_all, SORTBY_ID))
+
+        # Initial fetch
         query_params: Dict[str, Any] = self._construct_query_parameters(
-            query=query, limit=limit, offset=offset * limit, **kwargs
+            query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
         )
         temp_res = await self.folio_get_async(path, key, query_params=query_params)
         for item in temp_res:
             yield item
-        while len(temp_res) == limit:
+
+        # Continue fetching while we get full pages
+        while self.should_continue_pagination(temp_res, limit):
             offset += 1
-            temp_res = await self.folio_get_async(
-                path,
-                key,
-                query_params=self._construct_query_parameters(
-                    query=query, limit=limit, offset=offset * limit, **kwargs
-                ),
+            query_params = self._construct_query_parameters(
+                query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
             )
+            temp_res = await self.folio_get_async(path, key, query_params=query_params)
             for item in temp_res:
                 yield item
+
+        # Final fetch (handles edge case)
         offset += 1
-        final_res = await self.folio_get_async(
-            path,
-            key,
-            query_params=self._construct_query_parameters(
-                query=query, limit=limit, offset=offset * limit, **kwargs
-            ),
+        final_query_params = self._construct_query_parameters(
+            query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
         )
+        final_res = await self.folio_get_async(path, key, query_params=final_query_params)
         for item in final_res:
             yield item
 
@@ -1132,8 +1527,9 @@ class FolioClient:
         key: str | None = None,
         query: str | None = None,
         limit: int = 10,
+        no_cql: bool = False,
         **kwargs,
-    ) -> Generator:
+    ) -> Generator[Dict[str, Any], None, None]:
         """
         Fetches ALL data objects from FOLIO matching `query` in `limit`-size chunks and provides
         an iterable object yielding a single record at a time until all records have been returned.
@@ -1145,43 +1541,35 @@ class FolioClient:
             limit (int): The maximum number of records to fetch in each chunk.
             **kwargs: Additional URL parameters to pass to `path`.
         """
+        # Prepare and validate query using shared logic
         offset = None
-        if not query:
-            query = "cql.allRecords=1 " + SORTBY_ID
-        if SORTBY_ID not in query:
-            raise ValueError("FOLIO query must be sorted by ID")
-        query = query or " ".join((self.cql_all, SORTBY_ID))
+
+        # Initial fetch
         query_params: Dict[str, Any] = self._construct_query_parameters(
-            query=query, limit=limit, **kwargs
+            query=query, limit=limit, no_cql=no_cql, **kwargs
         )
         temp_res = self.folio_get(path, key, query_params=query_params)
-        try:
-            offset = temp_res[-1]["id"]
-        except IndexError:
-            yield from temp_res
+
+        # Handle empty results
+        if not temp_res:
             return
+
         yield from temp_res
-        while len(temp_res) == limit:
-            query_params = self._construct_query_parameters(query=query, limit=limit, **kwargs)
-            query_params["query"] = f'id>"{offset}" and ' + query_params["query"]
-            temp_res = self.folio_get(
-                path,
-                key,
-                query_params=query_params,
+        offset = self.get_last_id(temp_res)
+
+        # Continue fetching while we get full pages
+        while self.should_continue_pagination(temp_res, limit) and offset:
+            query_params = self._construct_query_parameters(
+                query=query, limit=limit, no_cql=no_cql, **kwargs
             )
-            try:
-                offset = temp_res[-1]["id"]
-            except IndexError:
-                yield from temp_res
+            query_params["query"] = self.construct_id_offset_query(query_params["query"], offset)
+            temp_res = self.folio_get(path, key, query_params=query_params)
+
+            if not temp_res:
                 return
+
             yield from temp_res
-        query_params = self._construct_query_parameters(query=query, limit=limit, **kwargs)
-        query_params["query"] = f'id>"{offset}" and ' + query_params["query"]
-        yield from self.folio_get(
-            path,
-            key,
-            query_params=query_params,
-        )
+            offset = self.get_last_id(temp_res)
 
     @use_client_session_with_generator
     async def _folio_get_all_by_id_offset_async(
@@ -1190,8 +1578,9 @@ class FolioClient:
         key: str | None = None,
         query: str | None = None,
         limit: int = 10,
+        no_cql: bool = False,
         **kwargs,
-    ) -> AsyncGenerator:
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Asynchronously fetches ALL data objects from FOLIO matching `query` in
         `limit`-size chunks and provides an async iterable object yielding a single
@@ -1204,57 +1593,55 @@ class FolioClient:
             limit (int): The maximum number of records to fetch in each chunk.
             **kwargs: Additional URL parameters to pass to `path`.
         """
-        # Set up query and validate
-        query = self._prepare_id_offset_query(query)
+        # Prepare and validate query using shared logic
+        offset = None
 
         # Initial fetch
         query_params: Dict[str, Any] = self._construct_query_parameters(
-            query=query, limit=limit, **kwargs
+            query=query, limit=limit, no_cql=no_cql, **kwargs
         )
         temp_res = await self.folio_get_async(path, key, query_params=query_params)
 
-        # Process initial results
+        # Handle empty results
         if not temp_res:
             return
 
         for item in temp_res:
             yield item
-        offset = self._get_last_id(temp_res)
+        offset = self.get_last_id(temp_res)
 
         # Continue fetching while we get full pages
-        while len(temp_res) == limit:
-            temp_res = await self._fetch_next_page(path, key, query, limit, offset, **kwargs)
+        while self.should_continue_pagination(temp_res, limit) and offset:
+            query_params = self._construct_query_parameters(
+                query=query, limit=limit, no_cql=no_cql, **kwargs
+            )
+            query_params["query"] = self.construct_id_offset_query(query_params["query"], offset)
+            temp_res = await self.folio_get_async(path, key, query_params=query_params)
+
             if not temp_res:
                 return
+
             for item in temp_res:
                 yield item
-            offset = self._get_last_id(temp_res)
+            offset = self.get_last_id(temp_res)
 
-    def _prepare_id_offset_query(self, query: str | None) -> str:
-        """Prepare and validate query for ID offset pagination"""
-        if not query:
-            query = "cql.allRecords=1 " + SORTBY_ID
-        if SORTBY_ID not in query:
-            raise ValueError("FOLIO query must be sorted by ID")
-        return query or " ".join((self.cql_all, SORTBY_ID))
+    def _construct_query_parameters(self, no_cql: bool = False, **kwargs) -> Dict[str, Any]:
+        """Private method to construct query parameters for folio_get or httpx client calls.
 
-    def _get_last_id(self, results: List[Dict[str, Any]]) -> str | None:
-        """Get the last ID from results for pagination"""
-        return results[-1]["id"] if results else None
+        This method ensures that the query parameter is properly formatted to pass in a
+        params dictionary to httpx. If no_cql is True, it will remove any default CQL
+        queries such as 'cql.allRecords=1' and 'sortBy id'. This is useful for the
+        handful of FOLIO APIs that do not follow the standard CQL query format and
+        rely on named query parameters instead (e.g. mod-inn-reach circulation
+        transaction APIs).
 
-    async def _fetch_next_page(
-        self, path: str, key: str, query: str, limit: int, offset: str, **kwargs
-    ) -> List[Dict[str, Any]]:
-        """Fetch the next page of results using ID offset"""
-        query_params = self._construct_query_parameters(query=query, limit=limit, **kwargs)
-        query_params["query"] = f'id>"{offset}" and ' + query_params["query"]
-        return await self.folio_get_async(path, key, query_params=query_params)
+        Args:
+            no_cql (bool): Whether to remove CQL-specific query components.
+                Defaults to False.
+            **kwargs: URL parameters to pass to the endpoint.
 
-    def _construct_query_parameters(self, **kwargs) -> Dict[str, Any]:
-        """Private method to construct query parameters for folio_get or httpx client calls
-
-        Parameters:
-            **kwargs: URL parameters to pass to `path`.
+        Returns:
+            Dict[str, Any]: Processed query parameters dictionary.
         """
         params = kwargs
         if query := kwargs.get("query"):
@@ -1262,13 +1649,24 @@ class FolioClient:
                 params["query"] = query.split("=", maxsplit=1)[1]
             else:
                 params["query"] = query
+            if no_cql:
+                params["query"] = (
+                    params["query"]
+                    .replace("cql.allRecords=1", "")
+                    .replace("sortBy id", "")
+                    .strip()
+                )
+            if not params.get("query"):
+                del params["query"]
         return params
 
-    def get_all(self, path, key=None, query=""):
+    def get_all(self, path, key=None, query="") -> Generator[Dict[str, Any], None, None]:
         """Alias for `folio_get_all`"""
         return self.folio_get_all(path, key, query)
 
-    async def get_all_async(self, path, key=None, query=""):
+    async def get_all_async(
+        self, path, key=None, query=""
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """Async alias for `folio_get_all_async`
 
         Note: This method wraps folio_get_all_async() for consistency.
@@ -1279,188 +1677,226 @@ class FolioClient:
 
     @folio_retry_on_server_error
     @folio_retry_on_auth_error
-    def folio_get(self, path, key=None, query="", query_params: dict = None):
-        """
-        Fetches data from FOLIO and turns it into a json object
-        Parameters:
-        path: FOLIO API endpoint path
-        key: Key in JSON response from FOLIO that includes the array of results for query APIs
-        query: For backwards-compatibility
-        query_params: Additional query parameters for the specified path. May also be used for
-                `query`
+    def folio_get(self, path, key=None, query="", query_params: dict = None) -> Any:
+        """Fetches data from FOLIO and returns it as a JSON object.
+
+        Args:
+            path (str): FOLIO API endpoint path.
+            key (str, optional): Key in JSON response that includes the array of results
+                for query APIs. Defaults to None.
+            query (str, optional): CQL query string for backwards-compatibility.
+                Defaults to "".
+            query_params (dict, optional): Additional query parameters for the specified
+                path. May also be used for query. Defaults to None.
+
+        Returns:
+            Union[dict, list]: The JSON response from FOLIO, either the full response
+                or the value of the specified key.
         """
         return self._folio_get(path, key, query, query_params=query_params)
 
     @folio_retry_on_server_error
     @folio_retry_on_auth_error
-    async def folio_get_async(self, path, key=None, query="", query_params: dict = None):
-        """
-        Asynchronously fetches data from FOLIO and turns it into a json object
-        Parameters:
-        path: FOLIO API endpoint path
-        key: Key in JSON response from FOLIO that includes the array of results for query APIs
-        query: For backwards-compatibility
-        query_params: Additional query parameters for the specified path. May also be used for
-                `query`
+    async def folio_get_async(self, path, key=None, query="", query_params: dict = None) -> Any:
+        """Asynchronously fetches data from FOLIO and returns it as a JSON object.
+
+        Args:
+            path (str): FOLIO API endpoint path.
+            key (str, optional): Key in JSON response that includes the array of results
+                for query APIs. Defaults to None.
+            query (str, optional): CQL query string for backwards-compatibility.
+                Defaults to "".
+            query_params (dict, optional): Additional query parameters for the specified
+                path. May also be used for query. Defaults to None.
+
+        Returns:
+            Union[dict, list]: The JSON response from FOLIO, either the full response
+                or the value of the specified key.
         """
         return await self._folio_get_async(path, key, query, query_params=query_params)
 
     @handle_remote_protocol_error
     @use_client_session
-    def _folio_get(self, path, key=None, query="", query_params: dict = None):
+    def _folio_get(self, path, key=None, query="", query_params: dict = None) -> Any:
+        """Private method that implements folio_get.
+
+        Args:
+            path (str): FOLIO API endpoint path.
+            key (str, optional): Key in JSON response that includes the array of results.
+            query (str, optional): CQL query string.
+            query_params (dict, optional): Additional query parameters.
+
+        Returns:
+            Union[dict, list]: The JSON response from FOLIO.
         """
-        Private method that implements `folio_get`
-        """
-        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+        # Ensure path doesn't start with / for httpx base_url to work properly
+        path = path.lstrip("/")
         if query and query_params:
             query_params = self._construct_query_parameters(query=query, **query_params)
         elif query:
             query_params = self._construct_query_parameters(query=query)
-        req = self.httpx_client.get(url, params=query_params)
+        req = self.httpx_client.get(path, params=query_params)
         req.raise_for_status()
-        return req.json()[key] if key else req.json()
+        return self.extract_response_data(req, key)
 
     @handle_remote_protocol_error
     @use_client_session
-    async def _folio_get_async(self, path, key=None, query="", query_params: dict = None):
+    async def _folio_get_async(self, path, key=None, query="", query_params: dict = None) -> Any:
         """
         Private async method that implements `folio_get_async`
         """
-        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+        # Ensure path doesn't start with / for httpx base_url to work properly
+        path = path.lstrip("/")
         if query and query_params:
             query_params = self._construct_query_parameters(query=query, **query_params)
         elif query:
             query_params = self._construct_query_parameters(query=query)
-        req = await self.async_httpx_client.get(url, params=query_params)
+        req = await self.async_httpx_client.get(path, params=query_params)
         req.raise_for_status()
-        return req.json()[key] if key else req.json()
+        return self.extract_response_data(req, key)
 
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
-    def folio_put(self, path, payload, query_params: dict = None):
-        """Convenience method to update data in FOLIO"""
-        url = path.rstrip("/")
+    def folio_put(self, path, payload, query_params: dict = None) -> Dict[str, Any] | None:
+        """Convenience method to update data in FOLIO.
+
+        Args:
+            path (str): FOLIO API endpoint path.
+            payload (dict): The data to update as JSON.
+            query_params (dict, optional): Additional query parameters. Defaults to None.
+
+        Returns:
+            dict: The JSON response from FOLIO.
+        """
+        # Ensure path doesn't start with / for httpx base_url to work properly
+        path = path.lstrip("/")
         req = self.httpx_client.put(
-            url,
+            path,
             json=payload,
             params=query_params,
         )
         req.raise_for_status()
-        try:
-            return req.json()
-        except json.JSONDecodeError:
-            return None
+        return self.handle_json_response(req)
 
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
-    async def folio_put_async(self, path, payload, query_params: dict = None):
-        """Asynchronous convenience method to update data in FOLIO"""
-        url = path.rstrip("/")
+    async def folio_put_async(
+        self, path, payload, query_params: dict = None
+    ) -> Dict[str, Any] | None:
+        """Asynchronous convenience method to update data in FOLIO.
+
+        Args:
+            path (str): FOLIO API endpoint path.
+            payload (dict): The data to update as JSON.
+            query_params (dict, optional): Additional query parameters. Defaults to None.
+
+        Returns:
+            dict: The JSON response from FOLIO.
+        """
+        path = path.lstrip("/")
         req = await self.async_httpx_client.put(
-            url,
+            path,
             json=payload,
             params=query_params,
         )
         req.raise_for_status()
-        try:
-            return req.json()
-        except json.JSONDecodeError:
-            return None
+        return self.handle_json_response(req)
 
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
-    def folio_post(self, path, payload, query_params: dict = None):
-        """Convenience method to post data to FOLIO"""
-        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+    def folio_post(self, path, payload, query_params: dict = None) -> Dict[str, Any] | None:
+        """Convenience method to post data to FOLIO.
+
+        Args:
+            path (str): FOLIO API endpoint path.
+            payload (dict): The data to post as JSON.
+            query_params (dict, optional): Additional query parameters. Defaults to None.
+
+        Returns:
+            dict: The JSON response from FOLIO.
+        """
+        # Ensure path doesn't start with / for httpx base_url to work properly
+        path = path.lstrip("/")
         req = self.httpx_client.post(
-            url,
+            path,
             json=payload,
             params=query_params,
         )
         req.raise_for_status()
-        try:
-            return req.json()
-        except json.JSONDecodeError:
-            return None
+        return self.handle_json_response(req)
 
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
-    async def folio_post_async(self, path, payload, query_params: dict = None):
-        """Asynchronous convenience method to post data to FOLIO"""
-        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+    async def folio_post_async(
+        self, path, payload, query_params: dict = None
+    ) -> Dict[str, Any] | None:
+        """Asynchronous convenience method to post data to FOLIO.
+
+        Args:
+            path (str): FOLIO API endpoint path.
+            payload (dict): The data to post as JSON.
+            query_params (dict, optional): Additional query parameters. Defaults to None.
+
+        Returns:
+            dict: The JSON response from FOLIO.
+        """
+        # Ensure path doesn't start with / for httpx base_url to work properly
+        path = path.lstrip("/")
         req = await self.async_httpx_client.post(
-            url,
+            path,
             json=payload,
             params=query_params,
         )
         req.raise_for_status()
-        try:
-            return req.json()
-        except json.JSONDecodeError:
-            return None
+        return self.handle_json_response(req)
 
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
-    def folio_delete(self, path, query_params: dict = None):
-        """Convenience method to delete data in FOLIO"""
-        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+    def folio_delete(self, path, query_params: dict = None) -> Dict[str, Any] | None:
+        """Convenience method to delete data in FOLIO.
+
+        Args:
+            path (str): FOLIO API endpoint path.
+            query_params (dict, optional): Additional query parameters. Defaults to None.
+
+        Returns:
+            dict: The response from FOLIO.
+        """
+        # Ensure path doesn't start with / for httpx base_url to work properly
+        path = path.lstrip("/")
         req = self.httpx_client.delete(
-            url,
+            path,
             params=query_params,
         )
-        try:
-            req.raise_for_status()
-        except httpx.HTTPStatusError:
-            if req.status_code == 404:
-                logger.warning(f"Resource not found: {path}")
-            else:
-                raise
-        try:
-            return req.json()
-        except json.JSONDecodeError:
-            # If the response is successful + empty, return None
-            if req.status_code == 204:
-                logger.info(f"Resource deleted: {path} ({req.status_code})")
-                return None
-            else:
-                logger.error(f"Failed to decode JSON response: {req.text}")
-                raise
+        return self.handle_delete_response(req, path)
 
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
-    async def folio_delete_async(self, path, query_params: dict = None):
+    async def folio_delete_async(self, path, query_params: dict = None) -> Dict[str, Any] | None:
         """Asynchronous convenience method to delete data in FOLIO"""
-        url = urljoin(self.gateway_url, path.lstrip("/")).rstrip("/")
+        # Ensure path doesn't start with / for httpx base_url to work properly
+        path = path.lstrip("/")
         req = await self.async_httpx_client.delete(
-            url,
+            path,
             params=query_params,
         )
-        try:
-            req.raise_for_status()
-        except httpx.HTTPStatusError:
-            if req.status_code == 404:
-                logger.warning(f"Resource not found: {path}")
-            else:
-                raise
-        try:
-            return req.json()
-        except json.JSONDecodeError:
-            # If the response is successful + empty, return None
-            if req.status_code == 204:
-                logger.info(f"Resource deleted: {path} ({req.status_code})")
-                return None
-            else:
-                logger.error(f"Failed to decode JSON response: {req.text}")
-                raise
+        return self.handle_delete_response(req, path)
 
-    def get_folio_http_client(self):
-        """Returns a httpx client for use in FOLIO communication"""
+    def get_folio_http_client(self) -> httpx.Client:
+        """Returns a httpx client for use in FOLIO communication.
+
+        Creates a synchronous HTTP client configured with the appropriate
+        authentication, base URL, timeout, and SSL verification settings.
+
+        Returns:
+            httpx.Client: Configured HTTP client for FOLIO API calls.
+        """
         return httpx.Client(
             timeout=self.http_timeout,
             verify=self.ssl_verify,
@@ -1469,8 +1905,15 @@ class FolioClient:
             headers=self.base_headers,
         )
 
-    def get_folio_http_client_async(self):
-        """Returns an async httpx client for use in FOLIO communication"""
+    def get_folio_http_client_async(self) -> httpx.AsyncClient:
+        """Returns an async httpx client for use in FOLIO communication.
+
+        Creates an asynchronous HTTP client configured with the appropriate
+        authentication, base URL, timeout, and SSL verification settings.
+
+        Returns:
+            httpx.AsyncClient: Configured async HTTP client for FOLIO API calls.
+        """
         return httpx.AsyncClient(
             timeout=self.http_timeout,
             verify=self.ssl_verify,
@@ -1479,19 +1922,28 @@ class FolioClient:
             headers=self.base_headers,
         )
 
-    def folio_get_single_object(self, path):
-        """Fetches data from FOLIO and turns it into a json object as is"""
+    def folio_get_single_object(self, path) -> Dict[str, Any] | None:
+        """Fetches data from FOLIO and returns it as a JSON object as-is.
+
+        This is a convenience method that calls folio_get without specifying a key.
+
+        Args:
+            path (str): FOLIO API endpoint path.
+
+        Returns:
+            dict: The complete JSON response from FOLIO.
+        """
         return self.folio_get(path)
 
-    async def folio_get_single_object_async(self, path):
+    async def folio_get_single_object_async(self, path) -> Dict[str, Any] | None:
         """Asynchronously fetches data from FOLIO and turns it into a json object as is"""
         return await self.folio_get_async(path)
 
-    def get_instance_json_schema(self):
+    def get_instance_json_schema(self) -> Dict[str, Any]:
         """Fetches the JSON Schema for instances"""
         return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/instance.json")
 
-    def get_holdings_schema(self):
+    def get_holdings_schema(self) -> Dict[str, Any]:
         """Fetches the JSON Schema for holdings"""
         try:
             return self.get_from_github(
@@ -1507,12 +1959,26 @@ class FolioClient:
             else:
                 raise
 
-    def get_item_schema(self):
+    def get_item_schema(self) -> Dict[str, Any]:
         """Fetches the JSON Schema for holdings"""
         return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/item.json")
 
     @staticmethod
-    def get_github_request_headers():
+    def get_github_request_headers() -> Dict[str, str]:
+        """Returns headers for GitHub API requests, including optional token.
+
+        If a GITHUB_TOKEN environment variable is set, it will be used for
+        authenticated requests to increase rate limits.
+
+        Returns:
+            dict: Headers for GitHub API requests.
+
+        Note:
+            - Ensure the GITHUB_TOKEN has appropriate permissions for the
+              repositories being accessed.
+            - Using a token helps avoid hitting GitHub's unauthenticated
+              rate limits, which are lower.
+        """
         github_headers = {
             "content-type": CONTENT_TYPE_JSON,
             "User-Agent": USER_AGENT_STRING,
@@ -1523,7 +1989,20 @@ class FolioClient:
         return github_headers
 
     @staticmethod
-    def get_latest_from_github(owner, repo, filepath: str, ssl_verify=True):  # noqa: S107
+    def get_latest_from_github(
+        owner, repo, filepath: str, ssl_verify=True
+    ) -> Dict[str, Any]:
+        """Fetches the latest version of a FOLIO record schema from a GitHub repository.
+
+        Args:
+            owner (str): The GitHub username or organization that owns the repository.
+            repo (str): The name of the GitHub repository.
+            filepath (str): The path to the file within the repository.
+            ssl_verify (bool): Whether to verify SSL certificates. Defaults to True.
+
+        Returns:
+            dict: The latest dereferenced version of the schema from the GitHub repository.
+        """
         latest_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
         req = httpx.get(
             latest_path,
@@ -1547,7 +2026,7 @@ class FolioClient:
         )
         return dereferenced
 
-    def get_from_github(self, owner, repo, filepath: str, ssl_verify=True):  # noqa: S107
+    def get_from_github(self, owner, repo, filepath: str, ssl_verify=True) -> Dict[str, Any]:  # noqa: S107
         version = self.get_module_version(repo)
         if not version:
             f_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
@@ -1576,7 +2055,7 @@ class FolioClient:
         return dereferenced
 
     @staticmethod
-    def fetch_github_schema(schema_url):
+    def fetch_github_schema(schema_url) -> Dict[str, Any]:
         """
         Fixes relative $ref references in the schema that refer to submodules,
         like raml-util.This method can be used as a loader in
@@ -1605,7 +2084,7 @@ class FolioClient:
         else:
             raise ValueError(f"Unknown file ending in {schema_url}")
 
-    def get_module_version(self, module_name: str):
+    def get_module_version(self, module_name: str) -> str | None:
         if res := next(
             (
                 f"v{a.replace(f'{module_name}-', '')}"
@@ -1619,11 +2098,11 @@ class FolioClient:
         else:
             raise ValueError(f"Module named {module_name} was not found in the tenant")
 
-    def get_user_schema(self):
+    def get_user_schema(self) -> Dict[str, Any]:
         """Fetches the JSON Schema for users"""
         return self.get_from_github("folio-org", "mod-users", "/ramls/userdata.json")
 
-    def get_location_id(self, location_code):
+    def get_location_id(self, location_code) -> str | None:
         """returns the location ID based on a location code"""
         try:
             return next(
@@ -1644,7 +2123,7 @@ class FolioClient:
                 )
             ) from exc
 
-    def get_metadata_construct(self):
+    def get_metadata_construct(self) -> Dict[str, str]:
         """creates a metadata construct with the current API user_id
         attached"""
         user_id = self.current_user
@@ -1655,7 +2134,7 @@ class FolioClient:
             "updatedByUserId": user_id,
         }
 
-    def get_loan_policy_id(self, item_type_id, loan_type_id, patron_group_id, location_id):
+    def get_loan_policy_id(self, item_type_id, loan_type_id, patron_group_id, location_id) -> str:
         """retrieves a loan policy from FOLIO, or uses a chached one"""
 
         lp_hash = get_loan_policy_hash(item_type_id, loan_type_id, patron_group_id, location_id)
@@ -1684,7 +2163,7 @@ class FolioClient:
         return [f["id"] for f in gs]
 
     @use_client_session
-    def put_user(self, user):
+    def put_user(self, user) -> Dict[str, Any] | None:
         """Fetches data from FOLIO and turns it into a json object as is"""
         url = f"/users/{user['id']}"
         print(url)
@@ -1695,7 +2174,7 @@ class FolioClient:
             raise
 
 
-def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id):
+def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id) -> str:
     """Generate a hash of the circulation rule parameters that key a loan policy"""
     return str(
         hashlib.sha224(
@@ -1706,7 +2185,7 @@ def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_lo
     )
 
 
-def validate_uuid(my_uuid):
+def validate_uuid(my_uuid) -> bool:
     """Validates that a string is a valid UUID"""
     reg = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"  # noqa
     pattern = re.compile(reg)
