@@ -21,7 +21,7 @@ dependencies = [
 [project.urls]
 homepage = "https://github.com/FOLIO-FSE/folioclient"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "coverage[toml]>=6.5.0,<7.0.0",
     "mypy>=1.17.1",
@@ -30,6 +30,8 @@ dev = [
     "ruff>=0.12.12",
     "pytest-asyncio>=1.2.0"
 ]
+
+[project.optional-dependencies]
 orjson = ["orjson>=3.11.3,<4.0.0"]
 docs = [
     "sphinx>=8.1.3",
