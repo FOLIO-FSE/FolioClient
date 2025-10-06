@@ -1403,7 +1403,7 @@ class FolioClient:
 
         # Initial fetch
         query_params: Dict[str, Any] = self._construct_query_parameters(
-            query=query, limit=limit, offset=offset * limit, **kwargs
+            query=query, limit=limit, offset=offset, no_cql=no_cql, **kwargs
         )
         temp_res = self.folio_get(path, key, query_params=query_params)
         yield from temp_res
@@ -1412,7 +1412,7 @@ class FolioClient:
         while self.should_continue_pagination(temp_res, limit):
             offset += 1
             query_params = self._construct_query_parameters(
-                query=query, limit=limit, offset=offset * limit, **kwargs
+                query=query, limit=limit, offset=offset, no_cql=no_cql, **kwargs
             )
             temp_res = self.folio_get(path, key, query_params=query_params)
             yield from temp_res
@@ -1420,7 +1420,7 @@ class FolioClient:
         # Final fetch (handles edge case)
         offset += 1
         final_query_params = self._construct_query_parameters(
-            query=query, limit=limit, offset=offset * limit, **kwargs
+            query=query, limit=limit, offset=offset, no_cql=no_cql, **kwargs
         )
         yield from self.folio_get(path, key, query_params=final_query_params)
 
@@ -1495,7 +1495,7 @@ class FolioClient:
 
         # Initial fetch
         query_params: Dict[str, Any] = self._construct_query_parameters(
-            query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
+            query=query, limit=limit, offset=offset, no_cql=no_cql, **kwargs
         )
         temp_res = await self.folio_get_async(path, key, query_params=query_params)
         for item in temp_res:
@@ -1505,7 +1505,7 @@ class FolioClient:
         while self.should_continue_pagination(temp_res, limit):
             offset += 1
             query_params = self._construct_query_parameters(
-                query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
+                query=query, limit=limit, offset=offset, no_cql=no_cql, **kwargs
             )
             temp_res = await self.folio_get_async(path, key, query_params=query_params)
             for item in temp_res:
@@ -1514,7 +1514,7 @@ class FolioClient:
         # Final fetch (handles edge case)
         offset += 1
         final_query_params = self._construct_query_parameters(
-            query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
+            query=query, limit=limit, offset=offset, no_cql=no_cql, **kwargs
         )
         final_res = await self.folio_get_async(path, key, query_params=final_query_params)
         for item in final_res:
