@@ -202,6 +202,7 @@ class FolioClient:
         password (str): The password for authentication.
         ssl_verify (bool): Whether to verify SSL certificates. Default is True.
         okapi_url (keyword-only, str, optional): Deprecated. Use gateway_url instead.
+        timeout (float | dict | httpx.Timeout | None, optional): Timeout configuration for HTTP requests.
     """  # noqa: E501
 
     def __init__(
@@ -950,8 +951,9 @@ class FolioClient:
         """
         Property that returns okapi headers with the current valid Okapi token.
 
-        .. deprecated::
-           Use :attr:`folio_headers` instead. This property will be removed in a future release.
+        Deprecated:
+            Since v1.0.0: Use `folio_headers` instead. This property will be removed
+            in a future release.
 
         **INTENDED FOR EXTERNAL USE ONLY**
         This property is designed for users who want to use their own HTTP libraries
@@ -1231,9 +1233,9 @@ class FolioClient:
         """
         Property that returns the expiration time of the current access token.
 
-        .. deprecated::
-           Use :attr:`access_token_expires` instead. This property will be removed in a future
-           release.
+        Deprecated:
+            Since v1.0.0: Use `access_token_expires` instead. This property will be
+            removed in a future release.
         """
         warn(
             "FolioClient.folio_token_expires is deprecated. Use access_token_expires instead.",
@@ -1795,8 +1797,7 @@ class FolioClient:
                 path. May also be used for query. Defaults to None.
 
         Returns:
-            Union[dict, list]: The JSON response from FOLIO, either the full response
-                or the value of the specified key.
+            Any: Returns value matching key or the JSON object as a dict
 
         Raises:
             FolioAuthenticationError: For 401 authentication failures.
@@ -1826,8 +1827,7 @@ class FolioClient:
                 path. May also be used for query. Defaults to None.
 
         Returns:
-            Union[dict, list]: The JSON response from FOLIO, either the full response
-                or the value of the specified key.
+            Any: Returns value matching key or the JSON object as a dict
         """
         return await self._folio_get_async(path, key, query, query_params=query_params)
 
@@ -1844,7 +1844,7 @@ class FolioClient:
             query_params (dict, optional): Additional query parameters.
 
         Returns:
-            Union[dict, list]: The JSON response from FOLIO.
+            Any: Returns value matching key or the JSON object as a dict
         """
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
@@ -1887,6 +1887,7 @@ class FolioClient:
 
         Returns:
             dict: The JSON response from FOLIO.
+            None: If the response is empty.
 
         Raises:
             FolioAuthenticationError: For 401 authentication failures.
@@ -1926,6 +1927,7 @@ class FolioClient:
 
         Returns:
             dict: The JSON response from FOLIO.
+            None: If the response is empty.
         """
         path = path.lstrip("/")
         req = await self.async_httpx_client.put(
@@ -1950,6 +1952,7 @@ class FolioClient:
 
         Returns:
             dict: The JSON response from FOLIO.
+            None: If the response is empty.
 
         Raises:
             FolioAuthenticationError: For 401 authentication failures.
@@ -1988,6 +1991,7 @@ class FolioClient:
 
         Returns:
             dict: The JSON response from FOLIO.
+            None: If the response is empty.
         """
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
@@ -2012,6 +2016,7 @@ class FolioClient:
 
         Returns:
             dict: The response from FOLIO.
+            None: If the response is empty.
 
         Raises:
             FolioAuthenticationError: For 401 authentication failures.
@@ -2036,7 +2041,26 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     async def folio_delete_async(self, path, query_params: dict = None) -> Dict[str, Any] | None:
-        """Asynchronous convenience method to delete data in FOLIO"""
+        """Asynchronous convenience method to delete data in FOLIO
+
+        Args:
+            path (str): FOLIO API endpoint path.
+            query_params (dict, optional): Additional query parameters. Defaults to None.
+
+        Returns:
+            dict: The response from FOLIO.
+            None: If the response is empty.
+
+        Raises:
+            FolioAuthenticationError: For 401 authentication failures.
+            FolioPermissionError: For 403 permission denied errors.
+            FolioResourceNotFoundError: For 404 not found errors (logged but not re-raised).
+            FolioInternalServerError: For 500 internal server errors.
+            FolioBadGatewayError: For 502 bad gateway errors.
+            FolioServiceUnavailableError: For 503 service unavailable errors.
+            FolioGatewayTimeoutError: For 504 gateway timeout errors.
+            FolioConnectionError: For network connectivity issues.
+        """
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
         req = await self.async_httpx_client.delete(
