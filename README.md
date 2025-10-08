@@ -27,6 +27,7 @@ FolioClient is a modern, async-capable Python library that provides a comprehens
 * **JSON Schema validation** - Latest FOLIO schemas fetched automatically
 * **FOLIO-specific exceptions** - Meaningful error types (FolioAuthenticationError, FolioValidationError, etc.)
 * **Intelligent retry logic** - Modern [tenacity](https://github.com/jd/tenacity)-based exponential backoff with configurable limits
+* **Granular timeout control** - Configure connection, read, write, and pool timeouts via environment variables or constructor
 
 ## Installing
 
@@ -38,6 +39,11 @@ pip install folioclient
 
 ```bash
 uv pip install folioclient  # Using uv (recommended)
+```
+
+**For experimental performance improvements:**
+```bash
+pip install folioclient[orjson]  # Experimental: faster JSON processing
 ```
 
 **For development:**
@@ -301,11 +307,11 @@ except FolioAuthenticationError:
     print("Authentication issue in custom request")
 ```
 
-### Built-in Retry Logic
+## Built-in Retry Logic
 FolioClient includes automatic retry logic powered by the modern **tenacity** library for certain error conditions:
 
 ```Python
-# Automatic retries are built into FolioClient methods for:
+# Automatic retries are built into FolioClient's FOLIO HTTP methods for:
 # - Authorization errors (403) - triggers automatic re-login and retry
 # - Server errors (502, 503, 504) - retries with exponential backoff
 # - Connection errors - retries with exponential backoff
@@ -335,7 +341,61 @@ FolioClient includes automatic retry logic powered by the modern **tenacity** li
 # AUTH_ERROR_RETRIES_MAX, AUTH_ERROR_RETRY_DELAY, AUTH_ERROR_RETRY_FACTOR
 ```
 
-### Custom HTTP Requests with FOLIO Headers
+## Timeout Configuration
+FolioClient provides granular timeout control for HTTP connections. Configure using environment variables or constructor parameters:
+
+```Python
+# Environment variables for global timeout configuration:
+# FOLIOCLIENT_CONNECT_TIMEOUT=30.0 (default: None - unlimited)
+# FOLIOCLIENT_READ_TIMEOUT=300.0 (default: None - unlimited)  
+# FOLIOCLIENT_WRITE_TIMEOUT=30.0 (default: None - unlimited)
+# FOLIOCLIENT_POOL_TIMEOUT=10.0 (default: None - unlimited)
+
+# Legacy timeout support:
+# FOLIOCLIENT_HTTP_TIMEOUT=60 (applies to all timeout types, default: None - unlimited)
+
+# Constructor timeout configuration:
+from folioclient import FolioClient
+import httpx
+
+# No timeout parameter - uses environment variables if set
+client = FolioClient(
+    "https://folio.example.com", "tenant", "user", "pass"
+    # Will use FOLIOCLIENT_*_TIMEOUT environment variables
+)
+
+# Explicit timeout=None - ignores all environment variables
+client = FolioClient(
+    "https://folio.example.com", "tenant", "user", "pass",
+    timeout=None  # Forces httpx defaults, ignores environment
+)
+
+# Single timeout value
+client = FolioClient(
+    "https://folio.example.com", "tenant", "user", "pass",
+    timeout=60.0
+)
+
+# Granular timeout dictionary
+client = FolioClient(
+    "https://folio.example.com", "tenant", "user", "pass", 
+    timeout={
+        "connect": 15.0,
+        "read": 180.0,
+        "write": 30.0,
+        "pool": 10.0
+    }
+)
+
+# httpx.Timeout object
+timeout_obj = httpx.Timeout(connect=15.0, read=180.0, write=30.0, pool=10.0)
+client = FolioClient(
+    "https://folio.example.com", "tenant", "user", "pass",
+    timeout=timeout_obj
+)
+```
+
+## Custom HTTP Requests with FOLIO Headers
 For custom HTTP implementations, access FOLIO headers with valid auth tokens:
 
 ```Python
@@ -362,7 +422,7 @@ async def fetch_with_aiohttp():
 instances = asyncio.run(fetch_with_aiohttp())
 ```
 
-### 🌐 **Enhanced ECS (Consortial) Support**
+## 🌐 **Enhanced ECS (Consortial) Support**
 FolioClient v1.0.0 provides improved support for FOLIO ECS (consortial) environments:
 
 ```Python
@@ -385,3 +445,24 @@ print(f"Back to: {fc.tenant_id}")  # 'cs01'
 # All API calls automatically use the correct tenant context
 instances = fc.folio_get("/instance-storage/instances", query_params={"limit": 10})
 ```
+
+## ⚠️ **Backwards-Incompatible Changes and Deprecations (v1.0.0)**
+
+FolioClient v1.0.0 introduces several backwards-incompatible changes. Please review before upgrading:
+
+### Major Changes
+- **Python 3.10+ required** - Dropped support for Python 3.8 and 3.9
+- **Timeout parameter behavior** - The `timeout` parameter now distinguishes between `None` (explicit no timeout) and unset (use environment defaults)
+- **Property return types** - Some properties now return different object types for better type safety
+
+### Deprecated Properties
+- **`http_timeout` property** - Now returns `httpx.Timeout` object instead of original parameter value. Will be removed in future release.
+- **`okapi_url` property** - Use `gateway_url` instead
+- **`okapi_headers` property** - Use `folio_headers` instead
+- **`okapi_token` property** - Use `access_token` instead
+- **`folio_token_expires` property** - Use `access_token_expires` instead
+
+### Removed methods
+- **`get_random_objects`
+
+For detailed migration guidance, see the [documentation](docs/changelog.md).
