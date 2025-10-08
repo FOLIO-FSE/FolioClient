@@ -303,10 +303,23 @@ class MockFolioClient:
         self.ssl_verify = True
         self.gateway_url = "https://test.folio.org"
         self.folio_auth = Mock()
+        self.is_closed = False
         
         # Mock client properties
         self.httpx_client.is_closed = False
         self.httpx_async_client.is_closed = False
+    
+    def get_folio_http_client(self):
+        """Mock implementation of get_folio_http_client"""
+        mock_client = Mock()
+        mock_client.is_closed = False
+        return mock_client
+    
+    def get_folio_http_client_async(self):
+        """Mock implementation of get_folio_http_client_async"""
+        mock_async_client = AsyncMock()
+        mock_async_client.is_closed = False
+        return mock_async_client
 
 
 class TestHandleRemoteProtocolErrorDecorator:
@@ -336,59 +349,66 @@ class TestHandleRemoteProtocolErrorDecorator:
                 raise httpx.RemoteProtocolError("Connection failed")
             return "success after retry"
         
-        with patch('httpx.Client') as mock_client_class:
-            mock_client_instance = Mock()
-            mock_client_class.return_value = mock_client_instance
-            mock_client_instance.is_closed = False
-            client.httpx_client = mock_client_instance
+        # Mock the get_folio_http_client method to return a new client
+        mock_new_client = Mock()
+        mock_new_client.is_closed = False
+        client.get_folio_http_client = Mock(return_value=mock_new_client)
+        
+        # Set up existing client
+        mock_existing_client = Mock()
+        mock_existing_client.is_closed = False
+        client.httpx_client = mock_existing_client
 
-            result = test_method(client)
-            
-            # Should succeed after retry
-            assert result == "success after retry"
-            assert call_count == 2
-            
-            # Should have closed old client and created new one
-            client.httpx_client.close.assert_called_once()
-            mock_client_class.assert_called_once_with(
-                timeout=client.http_timeout,
-                verify=client.ssl_verify,
-                base_url=client.gateway_url,
-                auth=client.folio_auth,
-            )
+        result = test_method(client)
+        
+        # Should succeed after retry
+        assert result == "success after retry"
+        assert call_count == 2
+        
+        # Should have closed old client and created new one
+        mock_existing_client.close.assert_called_once()
+        client.get_folio_http_client.assert_called_once()
 
     def test_sync_method_client_already_closed(self):
         """Test sync method when client is already closed"""
         client = MockFolioClient()
         client.httpx_client.is_closed = True
         
+        # Mock the get_folio_http_client method
+        mock_new_client = Mock()
+        mock_new_client.is_closed = False  
+        client.get_folio_http_client = Mock(return_value=mock_new_client)
+
         @handle_remote_protocol_error
         def test_method(self):
             raise httpx.RemoteProtocolError("Connection failed")
+
+        with pytest.raises(httpx.RemoteProtocolError):
+            test_method(client)
         
-        with patch('httpx.Client') as mock_client_class:
-            with pytest.raises(httpx.RemoteProtocolError):
-                test_method(client)
-            
-            # Should not try to close already closed client
-            client.httpx_client.close.assert_not_called()
+        # Should create new client even when existing client is closed
+        client.get_folio_http_client.assert_called_once()
 
     def test_sync_method_no_existing_client(self):
         """Test sync method when no existing client"""
         client = MockFolioClient()
         client.httpx_client = None
         
+        # Mock the get_folio_http_client method
+        mock_new_client = Mock()
+        mock_new_client.is_closed = False
+        client.get_folio_http_client = Mock(return_value=mock_new_client)
+
         @handle_remote_protocol_error
         def test_method(self):
             raise httpx.RemoteProtocolError("Connection failed")
-        
-        with patch('httpx.Client') as mock_client_class:
-            with pytest.raises(httpx.RemoteProtocolError):
-                test_method(client)
-            
-            # Should create new client
-            mock_client_class.assert_called_once()
 
+        with pytest.raises(httpx.RemoteProtocolError):
+            test_method(client)
+        
+        # Should create new client
+        client.get_folio_http_client.assert_called_once()
+    
     @pytest.mark.asyncio
     async def test_async_method_success_no_error(self):
         """Test that async methods work normally when no error occurs"""
@@ -415,43 +435,46 @@ class TestHandleRemoteProtocolErrorDecorator:
                 raise httpx.RemoteProtocolError("Async connection failed")
             return "async success after retry"
         
-        with patch('httpx.AsyncClient') as mock_async_client_class:
-            mock_async_client_instance = AsyncMock()
-            mock_async_client_class.return_value = mock_async_client_instance
-            mock_async_client_instance.is_closed = False
-            client.httpx_async_client = mock_async_client_instance
-            
-            result = await test_method(client)
-            
-            # Should succeed after retry
-            assert result == "async success after retry"
-            assert call_count == 2
-            
-            # Should have closed old client and created new one
-            client.httpx_async_client.aclose.assert_called_once()
-            mock_async_client_class.assert_called_once_with(
-                timeout=client.http_timeout,
-                verify=client.ssl_verify,
-                base_url=client.gateway_url,
-                auth=client.folio_auth,
-            )
+        # Mock the get_folio_http_client_async method to return a new async client
+        mock_new_async_client = AsyncMock()
+        mock_new_async_client.is_closed = False
+        client.get_folio_http_client_async = Mock(return_value=mock_new_async_client)
+        
+        # Set up existing async client
+        mock_existing_async_client = AsyncMock()
+        mock_existing_async_client.is_closed = False
+        client.httpx_async_client = mock_existing_async_client
 
+        result = await test_method(client)
+        
+        # Should succeed after retry
+        assert result == "async success after retry"
+        assert call_count == 2
+        
+        # Should have closed old client and created new one
+        mock_existing_async_client.aclose.assert_called_once()
+        client.get_folio_http_client_async.assert_called_once()
+    
     @pytest.mark.asyncio
     async def test_async_method_no_async_client_attribute(self):
         """Test async method when httpx_async_client attribute doesn't exist"""
         client = MockFolioClient()
         delattr(client, 'httpx_async_client')
         
+        # Mock the get_folio_http_client_async method
+        mock_new_async_client = AsyncMock()
+        mock_new_async_client.is_closed = False
+        client.get_folio_http_client_async = Mock(return_value=mock_new_async_client)
+
         @handle_remote_protocol_error
         async def test_method(self):
             raise httpx.RemoteProtocolError("Connection failed")
+
+        with pytest.raises(httpx.RemoteProtocolError):
+            await test_method(client)
         
-        with patch('httpx.AsyncClient') as mock_async_client_class:
-            with pytest.raises(httpx.RemoteProtocolError):
-                await test_method(client)
-            
-            # Should create new client even without existing attribute
-            mock_async_client_class.assert_called_once()
+        # Should create new client even without existing attribute
+        client.get_folio_http_client_async.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_async_method_client_already_closed(self):
@@ -459,16 +482,21 @@ class TestHandleRemoteProtocolErrorDecorator:
         client = MockFolioClient()
         client.httpx_async_client.is_closed = True
         
+        # Mock the get_folio_http_client_async method
+        mock_new_async_client = AsyncMock()
+        mock_new_async_client.is_closed = False
+        client.get_folio_http_client_async = Mock(return_value=mock_new_async_client)
+        
         @handle_remote_protocol_error
         async def test_method(self):
             raise httpx.RemoteProtocolError("Connection failed")
         
-        with patch('httpx.AsyncClient') as mock_async_client_class:
-            with pytest.raises(httpx.RemoteProtocolError):
-                await test_method(client)
-            
-            # Should not try to close already closed client
-            client.httpx_async_client.aclose.assert_not_called()
+        with pytest.raises(httpx.RemoteProtocolError):
+            await test_method(client)
+        
+        # Should not try to close already closed client, but should create new one
+        client.httpx_async_client.aclose.assert_not_called()
+        client.get_folio_http_client_async.assert_called_once()
 
     def test_other_exceptions_not_caught_sync(self):
         """Test that other exceptions are not caught by sync decorator"""
@@ -557,33 +585,41 @@ class TestHandleRemoteProtocolErrorDecorator:
         """Test that logging occurs when error is handled in sync method"""
         client = MockFolioClient()
         
+        # Mock the get_folio_http_client method
+        mock_new_client = Mock()
+        mock_new_client.is_closed = False
+        client.get_folio_http_client = Mock(return_value=mock_new_client)
+        
         @handle_remote_protocol_error
         def test_method(self):
             raise httpx.RemoteProtocolError("Test error")
         
-        with patch('httpx.Client'):
-            with patch('folioclient.decorators.logging.warning') as mock_log:
-                with pytest.raises(httpx.RemoteProtocolError):
-                    test_method(client)
-                
-                mock_log.assert_called_once_with(
-                    "Caught httpx.RemoteProtocolError. Recreate httpx.Client and retry."
-                )
+        with patch('folioclient.decorators.logging.warning') as mock_log:
+            with pytest.raises(httpx.RemoteProtocolError):
+                test_method(client)
+            
+            mock_log.assert_called_once_with(
+                "Caught httpx.RemoteProtocolError. Recreate httpx.Client and retry."
+            )
 
     @pytest.mark.asyncio
     async def test_logging_on_error_async(self):
         """Test that logging occurs when error is handled in async method"""
         client = MockFolioClient()
         
+        # Mock the get_folio_http_client_async method
+        mock_new_async_client = AsyncMock()
+        mock_new_async_client.is_closed = False
+        client.get_folio_http_client_async = Mock(return_value=mock_new_async_client)
+        
         @handle_remote_protocol_error
         async def test_method(self):
             raise httpx.RemoteProtocolError("Test error")
         
-        with patch('httpx.AsyncClient'):
-            with patch('folioclient.decorators.logging.warning') as mock_log:
-                with pytest.raises(httpx.RemoteProtocolError):
-                    await test_method(client)
-                
-                mock_log.assert_called_once_with(
-                    "Caught httpx.RemoteProtocolError. Recreate httpx.AsyncClient and retry."
-                )
+        with patch('folioclient.decorators.logging.warning') as mock_log:
+            with pytest.raises(httpx.RemoteProtocolError):
+                await test_method(client)
+            
+            mock_log.assert_called_once_with(
+                "Caught httpx.RemoteProtocolError. Recreate httpx.AsyncClient and retry."
+            )
