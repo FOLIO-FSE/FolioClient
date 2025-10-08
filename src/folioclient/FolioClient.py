@@ -1446,7 +1446,7 @@ class FolioClient:
         path: str,
         key: str | None = None,
         query: str | None = None,
-        limit: int = 10,
+        limit: int = 100,
         no_cql: bool = False,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
@@ -1536,7 +1536,7 @@ class FolioClient:
         path: str,
         key: str | None = None,
         query: str | None = None,
-        limit: int = 10,
+        limit: int = 100,
         no_cql: bool = False,
         **kwargs,
     ) -> AsyncGenerator[Dict[str, Any], None]:
