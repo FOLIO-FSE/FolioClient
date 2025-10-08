@@ -44,7 +44,7 @@ __all__ = [
     "FolioClient",
     # FOLIO Auth Components
     "FolioAuth",
-    "FolioConnectionParameters"
+    "FolioConnectionParameters",
     # Base exceptions
     "FolioError",
     "FolioClientClosed",
