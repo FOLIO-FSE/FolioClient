@@ -22,6 +22,8 @@ class FolioConnectionParameters:
         username (str): The username for authentication.
         password (str): The password for authentication.
         ssl_verify (bool): Whether to verify SSL certificates.
+        timeout (httpx.Timeout | None): Configured timeout object for HTTP requests,
+            or None for unlimited timeout (default behavior)
     """
 
     gateway_url: str
@@ -29,7 +31,7 @@ class FolioConnectionParameters:
     username: str
     password: str
     ssl_verify: bool
-    timeout: float
+    timeout: httpx.Timeout | None
 
 
 class FolioAuth(httpx.Auth):

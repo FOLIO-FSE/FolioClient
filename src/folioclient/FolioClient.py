@@ -59,6 +59,7 @@ CONTENT_TYPE_JSON = "application/json"
 
 SORTBY_ID = "sortBy id"
 
+# Legacy timeout constant for backward compatibility
 try:
     HTTPX_TIMEOUT = int(os.environ.get("FOLIOCLIENT_HTTP_TIMEOUT"))
 except TypeError:
@@ -70,6 +71,36 @@ USER_AGENT_STRING = "Folio Client (https://github.com/FOLIO-FSE/FolioClient)"
 
 # Set up logger
 logger = logging.getLogger("FolioClient")
+
+# Sentinel value for detecting unset timeout parameter
+_TIMEOUT_UNSET = object()
+
+
+# Timeout configuration with granular control
+def _get_timeout_config() -> dict:
+    """Get timeout configuration from environment variables or defaults.
+
+    Returns:
+        dict: Timeout configuration dictionary with connect, read, write, and pool timeouts.
+    """
+    # Granular timeout configuration - these override the default when set
+    return {
+        "connect": float(os.environ["FOLIOCLIENT_CONNECT_TIMEOUT"])
+        if "FOLIOCLIENT_CONNECT_TIMEOUT" in os.environ
+        else None,
+        "read": float(os.environ["FOLIOCLIENT_READ_TIMEOUT"])
+        if "FOLIOCLIENT_READ_TIMEOUT" in os.environ
+        else None,
+        "write": float(os.environ["FOLIOCLIENT_WRITE_TIMEOUT"])
+        if "FOLIOCLIENT_WRITE_TIMEOUT" in os.environ
+        else None,
+        "pool": float(os.environ["FOLIOCLIENT_POOL_TIMEOUT"])
+        if "FOLIOCLIENT_POOL_TIMEOUT" in os.environ
+        else None,
+    }
+
+
+TIMEOUT_CONFIG = _get_timeout_config()
 
 
 class FolioHeadersDict(dict):
@@ -182,6 +213,7 @@ class FolioClient:
         *,
         ssl_verify: bool = True,
         okapi_url: str = None,
+        timeout: float | dict | httpx.Timeout | None = _TIMEOUT_UNSET,
     ):
         if okapi_url:
             warn(
@@ -198,13 +230,25 @@ class FolioClient:
         self.missing_location_codes = set()
         self.loan_policies = {}
         self.cql_all = "cql.allRecords=1"
+
+        # Determine timeout value to use
+        if timeout is _TIMEOUT_UNSET:
+            # User didn't specify timeout, use environment variables
+            timeout_value = FolioClient._construct_timeout_from_env()
+        elif timeout is None:
+            # User explicitly passed None, ignore environment variables
+            timeout_value = httpx.Timeout(None)
+        else:
+            # User passed specific value (float, dict, or httpx.Timeout)
+            timeout_value = FolioClient._construct_timeout(timeout)
+
         self.folio_parameters: FolioConnectionParameters = FolioConnectionParameters(
             gateway_url=okapi_url or gateway_url,
             tenant_id=tenant_id,
             username=username,
             password=password,
             ssl_verify=ssl_verify,
-            timeout=HTTPX_TIMEOUT,
+            timeout=timeout_value,
         )
         self.folio_auth: FolioAuth = FolioAuth(self.folio_parameters)
         self.httpx_client: httpx.Client | None = None
@@ -341,6 +385,46 @@ class FolioClient:
             self.folio_auth._token = None
             self.folio_auth._params = None
 
+    @staticmethod
+    def _construct_timeout_from_env() -> httpx.Timeout:
+        """Construct httpx.Timeout object from environment variables only.
+
+        Returns:
+            httpx.Timeout: Configured timeout object from environment variables.
+                          If no environment configuration is found, returns httpx.Timeout(None).
+        """
+        default_timeout_config = {k: v for k, v in TIMEOUT_CONFIG.items() if v is not None}
+
+        if not default_timeout_config and HTTPX_TIMEOUT is None:
+            return httpx.Timeout(None)
+
+        return httpx.Timeout(HTTPX_TIMEOUT, **default_timeout_config)
+
+    @staticmethod
+    def _construct_timeout(timeout: float | dict | httpx.Timeout) -> httpx.Timeout:
+        """Construct httpx.Timeout object from user-provided timeout parameter.
+
+        If timeout is a dict, any unspecified values will be replaced by the environment
+        default values. If you want full control over every timeout value, set them explicitly
+        in the dict.
+
+        Args:
+            timeout: Timeout configuration - can be float, dict, or httpx.Timeout.
+
+        Returns:
+            httpx.Timeout: Configured timeout object.
+        """
+        if isinstance(timeout, httpx.Timeout):
+            return timeout
+        elif isinstance(timeout, dict):
+            # For user-provided dict, merge with environment defaults
+            default_timeout_config = {k: v for k, v in TIMEOUT_CONFIG.items() if v is not None}
+            merged_timeout = {**default_timeout_config, **timeout}
+            return httpx.Timeout(HTTPX_TIMEOUT, **merged_timeout)
+        else:
+            # Handle float/int timeout
+            return httpx.Timeout(timeout)
+
     @property
     def okapi_url(self) -> str:
         """Convenience property for backwards-compatibility with pre-Sunflower FOLIO systems.
@@ -462,12 +546,30 @@ class FolioClient:
         return self.folio_parameters.ssl_verify
 
     @property
-    def http_timeout(self) -> int | None:
-        """The HTTP timeout value.
+    def http_timeout(self) -> httpx.Timeout | None:
+        """The HTTP timeout configuration.
 
-        This is a convenience property that returns the timeout value from the
-        FolioConnectionParameters.
+        Warning:
+            DEPRECATED: This property will be removed in a future release. The return value
+            is an httpx.Timeout object which may not be compatible with other HTTP libraries.
+
+            BREAKING CHANGE: This property now returns an httpx.Timeout object instead of
+            the original timeout parameter value. This may break backwards compatibility
+            if you were using this property with other HTTP libraries.
+
+        Returns the httpx.Timeout object configured during initialization,
+        or None for no timeout.
+
+        Returns:
+            httpx.Timeout | None: Configured timeout object for HTTP requests,
+                or None for no timeout.
         """
+        warn(
+            "FolioClient.http_timeout is deprecated and will be removed in a future release. "
+            "The returned httpx.Timeout object may not be compatible with other HTTP libraries.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.folio_parameters.timeout
 
     def _clear_cached_properties(self, *property_names: str) -> None:

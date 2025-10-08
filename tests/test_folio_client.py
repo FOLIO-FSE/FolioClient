@@ -480,3 +480,162 @@ def test_github_methods_raise_httpx_exceptions(mock_httpx_get):
     
     with pytest.raises(httpx.HTTPStatusError):
         FolioClient.get_latest_from_github("owner", "repo", "file.json")
+
+
+def test_timeout_configuration():
+    """Test various timeout configuration options"""
+    
+    # Test with float timeout
+    with folio_auth_patch() as mock_auth:
+        client = FolioClient(
+            "https://test.example.com",
+            "test_tenant",
+            "test_user",
+            "test_pass",
+            timeout=60.0
+        )
+        
+        timeout_obj = client.http_timeout
+        assert isinstance(timeout_obj, httpx.Timeout)
+        assert timeout_obj.connect == 60.0
+        assert timeout_obj.read == 60.0
+        assert timeout_obj.write == 60.0
+        assert timeout_obj.pool == 60.0
+
+
+def test_timeout_configuration_dict():
+    """Test timeout configuration with dictionary"""
+    
+    timeout_config = {
+        "connect": 10.0,
+        "read": 120.0,
+        "write": 30.0,
+        "pool": 5.0
+    }
+    
+    with folio_auth_patch() as mock_auth:
+        client = FolioClient(
+            "https://test.example.com",
+            "test_tenant",
+            "test_user",
+            "test_pass",
+            timeout=timeout_config
+        )
+        
+        timeout_obj = client.http_timeout
+        assert isinstance(timeout_obj, httpx.Timeout)
+        assert timeout_obj.connect == 10.0
+        assert timeout_obj.read == 120.0
+        assert timeout_obj.write == 30.0
+        assert timeout_obj.pool == 5.0
+
+
+def test_timeout_configuration_httpx_object():
+    """Test timeout configuration with httpx.Timeout object"""
+    
+    timeout_obj = httpx.Timeout(connect=15.0, read=45.0, write=25.0, pool=8.0)
+    
+    with folio_auth_patch() as mock_auth:
+        client = FolioClient(
+            "https://test.example.com",
+            "test_tenant",
+            "test_user",
+            "test_pass",
+            timeout=timeout_obj
+        )
+        
+        client_timeout = client.http_timeout
+        assert client_timeout is timeout_obj
+        assert client_timeout.connect == 15.0
+        assert client_timeout.read == 45.0
+        assert client_timeout.write == 25.0
+        assert client_timeout.pool == 8.0
+
+
+def test_timeout_configuration_none():
+    """Test timeout configuration with None (should use global config)"""
+    
+    with folio_auth_patch() as mock_auth:
+        client = FolioClient(
+            "https://test.example.com",
+            "test_tenant",
+            "test_user",
+            "test_pass",
+            timeout=None
+        )
+        
+        timeout_obj = client.http_timeout
+        # When no environment variables are set, should return Timeout(timeout=None)
+        # This ensures httpx always gets a proper Timeout object with default behavior
+        assert timeout_obj is not None
+        assert timeout_obj.connect is None
+        assert timeout_obj.read is None
+        assert timeout_obj.write is None
+        assert timeout_obj.pool is None
+
+
+def test_http_client_creation_with_timeout():
+    """Test that HTTP clients are created with correct timeout configuration"""
+    
+    timeout_config = {
+        "connect": 15.0,
+        "read": 180.0,
+        "write": 45.0,
+        "pool": 12.0
+    }
+    
+    with folio_auth_patch() as mock_auth:
+        client = FolioClient(
+            "https://test.example.com",
+            "test_tenant",
+            "test_user",
+            "test_pass",
+            timeout=timeout_config
+        )
+        
+        # Test sync client creation
+        sync_client = client.get_folio_http_client()
+        assert isinstance(sync_client.timeout, httpx.Timeout)
+        assert sync_client.timeout.connect == 15.0
+        assert sync_client.timeout.read == 180.0
+        assert sync_client.timeout.write == 45.0
+        assert sync_client.timeout.pool == 12.0
+        
+        # Test async client creation
+        async_client = client.get_folio_http_client_async()
+        assert isinstance(async_client.timeout, httpx.Timeout)
+        assert async_client.timeout.connect == 15.0
+        assert async_client.timeout.read == 180.0
+        assert async_client.timeout.write == 45.0
+        assert async_client.timeout.pool == 12.0
+
+
+def test_http_client_creation_with_no_timeout():
+    """Test that HTTP clients are created with no timeout by default"""
+    
+    with folio_auth_patch() as mock_auth:
+        client = FolioClient(
+            "https://test.example.com",
+            "test_tenant",
+            "test_user",
+            "test_pass"
+            # No timeout parameter provided
+        )
+        
+        # Test sync client creation
+        sync_client = client.get_folio_http_client()
+        # httpx creates a default Timeout object when None is passed
+        assert isinstance(sync_client.timeout, httpx.Timeout)
+        # All individual timeout values should be None (unlimited)
+        assert sync_client.timeout.connect is None
+        assert sync_client.timeout.read is None
+        assert sync_client.timeout.write is None
+        assert sync_client.timeout.pool is None
+        
+        # Test async client creation
+        async_client = client.get_folio_http_client_async()
+        assert isinstance(async_client.timeout, httpx.Timeout)
+        assert async_client.timeout.connect is None
+        assert async_client.timeout.read is None
+        assert async_client.timeout.write is None
+        assert async_client.timeout.pool is None
