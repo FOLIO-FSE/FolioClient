@@ -2305,7 +2305,7 @@ class FolioClient:
         return self.get_from_github("folio-org", "mod-users", "/ramls/userdata.json")
 
     def get_location_id(self, location_code) -> str | None:
-        """returns the location ID based on a location code"""
+        """Returns the location ID based on a location code"""
         try:
             return next(
                 (l["id"] for l in self.locations if location_code.strip() == l["code"]),
@@ -2337,7 +2337,7 @@ class FolioClient:
         }
 
     def get_loan_policy_id(self, item_type_id, loan_type_id, patron_group_id, location_id) -> str:
-        """retrieves a loan policy from FOLIO, or uses a chached one"""
+        """Retrieves a loan policy from FOLIO, or uses a cached one"""
 
         lp_hash = get_loan_policy_hash(item_type_id, loan_type_id, patron_group_id, location_id)
         if lp_hash in self.loan_policies:
@@ -2366,7 +2366,7 @@ class FolioClient:
 
     @use_client_session
     def put_user(self, user) -> Dict[str, Any] | None:
-        """Fetches data from FOLIO and turns it into a json object as is"""
+        """Updates a FOLIO user record"""
         url = f"/users/{user['id']}"
         print(url)
         try:
