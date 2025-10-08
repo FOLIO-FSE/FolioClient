@@ -1152,9 +1152,10 @@ class FolioClient:
             FolioClientClosed: If the client has been closed.
         """
         if not self.is_closed:
-            self.folio_auth._token = (
-                self.folio_auth._do_sync_auth()
-            )  # Force re-authentication if needed
+            with self.folio_auth._lock:
+                self.folio_auth._token = (
+                    self.folio_auth._do_sync_auth()
+                )  # Force re-authentication if needed
         else:
             raise FolioClientClosed()
 
@@ -1170,7 +1171,8 @@ class FolioClient:
             FolioClientClosed: If the client has been closed.
         """
         if not self.is_closed:
-            self.folio_auth._token = await self.folio_auth._do_async_auth()
+            with self.folio_auth._lock:
+                self.folio_auth._token = await self.folio_auth._do_async_auth()
         else:
             raise FolioClientClosed()
 
