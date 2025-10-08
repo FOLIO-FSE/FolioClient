@@ -16,6 +16,7 @@ dependencies = [
     "py-openapi-schema-to-json-schema>=0.0.3",
     "python-dateutil>=2.9.0.post0",
     "pyyaml>=6.0.2",
+    "tenacity>=9.0.0",
 ]
 
 [project.urls]
