@@ -25,7 +25,12 @@ if _PYTHON_3_10:
 from folioclient.FolioClient import FolioClient
 from httpx import HTTPError, UnsupportedProtocol
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
-from folioclient.exceptions import FolioClientClosed
+import httpx
+
+# Import all FOLIO exceptions used in tests
+from folioclient.exceptions import (
+    FolioClientClosed,
+)
 
 
 def folio_auth_patch():
@@ -442,3 +447,36 @@ def test_get_folio_http_client_async_returns_async_client(mock_ecs_check):
         assert async_client is not None
         assert hasattr(async_client, "get")
         assert hasattr(async_client, "post")
+
+
+def test_handle_delete_response_raises_httpx_exceptions():
+    """Test that handle_delete_response raises httpx exceptions (not FOLIO exceptions)"""
+    
+    # Create a mock response that will raise an exception
+    mock_response = Mock()
+    mock_response.status_code = 500
+    mock_response.text = "Internal Server Error"
+    mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "500 Internal Server Error", request=Mock(), response=mock_response
+    )
+    
+    # The static method should raise httpx exceptions, not FOLIO exceptions
+    # The calling method (folio_delete) has the @folio_errors decorator
+    with pytest.raises(httpx.HTTPStatusError):
+        FolioClient.handle_delete_response(mock_response, "/test")
+
+
+@patch('httpx.get')
+def test_github_methods_raise_httpx_exceptions(mock_httpx_get):
+    """Test that GitHub-related methods raise standard httpx exceptions"""
+    
+    # Mock httpx.get to raise an exception
+    mock_response = Mock()
+    mock_response.status_code = 404
+    mock_response.text = "Not Found"
+    mock_httpx_get.return_value.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "404 Not Found", request=Mock(), response=mock_response
+    )
+    
+    with pytest.raises(httpx.HTTPStatusError):
+        FolioClient.get_latest_from_github("owner", "repo", "file.json")

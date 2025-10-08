@@ -26,7 +26,7 @@ from folioclient.decorators import (
     use_client_session,
     use_client_session_with_generator,
 )
-from folioclient.exceptions import FolioClientClosed
+from folioclient.exceptions import FolioClientClosed, folio_errors
 
 # Conditional import of orjson to support faster JSON processing if available
 try:
@@ -171,7 +171,7 @@ class FolioClient:
         password (str): The password for authentication.
         ssl_verify (bool): Whether to verify SSL certificates. Default is True.
         okapi_url (keyword-only, str, optional): Deprecated. Use gateway_url instead.
-    """ # noqa: E501
+    """  # noqa: E501
 
     def __init__(
         self,
@@ -1310,7 +1310,8 @@ class FolioClient:
             Any: The response data if successful, None for 204 status.
 
         Raises:
-            httpx.HTTPStatusError: For non-404 HTTP errors.
+            httpx.HTTPStatusError: For HTTP status errors (will be converted to FOLIO
+                exceptions by the calling method's @folio_errors decorator).
         """
         try:
             response.raise_for_status()
@@ -1692,6 +1693,17 @@ class FolioClient:
         Returns:
             Union[dict, list]: The JSON response from FOLIO, either the full response
                 or the value of the specified key.
+
+        Raises:
+            FolioAuthenticationError: For 401 authentication failures.
+            FolioPermissionError: For 403 permission denied errors.
+            FolioResourceNotFoundError: For 404 not found errors.
+            FolioValidationError: For 422 validation errors.
+            FolioInternalServerError: For 500 internal server errors.
+            FolioBadGatewayError: For 502 bad gateway errors.
+            FolioServiceUnavailableError: For 503 service unavailable errors.
+            FolioGatewayTimeoutError: For 504 gateway timeout errors.
+            FolioConnectionError: For network connectivity issues.
         """
         return self._folio_get(path, key, query, query_params=query_params)
 
@@ -1715,6 +1727,7 @@ class FolioClient:
         """
         return await self._folio_get_async(path, key, query, query_params=query_params)
 
+    @folio_errors
     @handle_remote_protocol_error
     @use_client_session
     def _folio_get(self, path, key=None, query="", query_params: dict = None) -> Any:
@@ -1739,6 +1752,7 @@ class FolioClient:
         req.raise_for_status()
         return self.extract_response_data(req, key)
 
+    @folio_errors
     @handle_remote_protocol_error
     @use_client_session
     async def _folio_get_async(self, path, key=None, query="", query_params: dict = None) -> Any:
@@ -1755,6 +1769,7 @@ class FolioClient:
         req.raise_for_status()
         return self.extract_response_data(req, key)
 
+    @folio_errors
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
@@ -1768,6 +1783,18 @@ class FolioClient:
 
         Returns:
             dict: The JSON response from FOLIO.
+
+        Raises:
+            FolioAuthenticationError: For 401 authentication failures.
+            FolioPermissionError: For 403 permission denied errors.
+            FolioResourceNotFoundError: For 404 not found errors.
+            FolioValidationError: For 422 validation errors (invalid data).
+            FolioDataConflictError: For 409 conflict errors.
+            FolioInternalServerError: For 500 internal server errors.
+            FolioBadGatewayError: For 502 bad gateway errors.
+            FolioServiceUnavailableError: For 503 service unavailable errors.
+            FolioGatewayTimeoutError: For 504 gateway timeout errors.
+            FolioConnectionError: For network connectivity issues.
         """
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
@@ -1779,6 +1806,7 @@ class FolioClient:
         req.raise_for_status()
         return self.handle_json_response(req)
 
+    @folio_errors
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
@@ -1804,6 +1832,7 @@ class FolioClient:
         req.raise_for_status()
         return self.handle_json_response(req)
 
+    @folio_errors
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
@@ -1817,6 +1846,17 @@ class FolioClient:
 
         Returns:
             dict: The JSON response from FOLIO.
+
+        Raises:
+            FolioAuthenticationError: For 401 authentication failures.
+            FolioPermissionError: For 403 permission denied errors.
+            FolioValidationError: For 422 validation errors (invalid data).
+            FolioDataConflictError: For 409 conflict errors (duplicate data).
+            FolioInternalServerError: For 500 internal server errors.
+            FolioBadGatewayError: For 502 bad gateway errors.
+            FolioServiceUnavailableError: For 503 service unavailable errors.
+            FolioGatewayTimeoutError: For 504 gateway timeout errors.
+            FolioConnectionError: For network connectivity issues.
         """
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
@@ -1828,6 +1868,7 @@ class FolioClient:
         req.raise_for_status()
         return self.handle_json_response(req)
 
+    @folio_errors
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
@@ -1854,6 +1895,7 @@ class FolioClient:
         req.raise_for_status()
         return self.handle_json_response(req)
 
+    @folio_errors
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
@@ -1866,6 +1908,16 @@ class FolioClient:
 
         Returns:
             dict: The response from FOLIO.
+
+        Raises:
+            FolioAuthenticationError: For 401 authentication failures.
+            FolioPermissionError: For 403 permission denied errors.
+            FolioResourceNotFoundError: For 404 not found errors (logged but not re-raised).
+            FolioInternalServerError: For 500 internal server errors.
+            FolioBadGatewayError: For 502 bad gateway errors.
+            FolioServiceUnavailableError: For 503 service unavailable errors.
+            FolioGatewayTimeoutError: For 504 gateway timeout errors.
+            FolioConnectionError: For network connectivity issues.
         """
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
@@ -1875,6 +1927,7 @@ class FolioClient:
         )
         return self.handle_delete_response(req, path)
 
+    @folio_errors
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
@@ -2000,6 +2053,10 @@ class FolioClient:
 
         Returns:
             dict: The latest dereferenced version of the schema from the GitHub repository.
+
+        Raises:
+            httpx.HTTPStatusError: For HTTP errors from GitHub API.
+            httpx.RequestError: For network connectivity issues.
         """
         latest_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
         req = httpx.get(
@@ -2025,6 +2082,21 @@ class FolioClient:
         return dereferenced
 
     def get_from_github(self, owner, repo, filepath: str, ssl_verify=True) -> Dict[str, Any]:  # noqa: S107
+        """Fetches a FOLIO record schema from a GitHub repository.
+
+        Args:
+            owner (str): The GitHub username or organization that owns the repository.
+            repo (str): The name of the GitHub repository.
+            filepath (str): The path to the file within the repository.
+            ssl_verify (bool): Whether to verify SSL certificates. Defaults to True.
+
+        Returns:
+            dict: The dereferenced version of the schema from the GitHub repository.
+
+        Raises:
+            httpx.HTTPStatusError: For HTTP errors from GitHub API.
+            httpx.RequestError: For network connectivity issues.
+        """
         version = self.get_module_version(repo)
         if not version:
             f_path = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
@@ -2064,6 +2136,10 @@ class FolioClient:
 
         Returns
             The fixed schema.
+
+        Raises:
+            httpx.HTTPStatusError: For HTTP errors from GitHub API.
+            httpx.RequestError: For network connectivity issues.
         """
         schema_response = httpx.get(
             schema_url,
