@@ -1,5 +1,5 @@
 # FolioClient
-![example workflow](https://github.com/folio-fse/FolioClient/actions/workflows/python-package.yml/badge.svg)    
+![test and lint](https://github.com/folio-fse/FolioClient/actions/workflows/python-package.yml/badge.svg)    
 FolioClient is a modern, async-capable Python library that provides a comprehensive interface to FOLIO Library Systems Platform APIs. Built on HTTPX with robust authentication, automatic token management, and full support for both synchronous and asynchronous operations.
 
 ## Features
@@ -25,7 +25,8 @@ FolioClient is a modern, async-capable Python library that provides a comprehens
 * **Pre-configured HTTP clients** - `get_folio_http_client()` and `get_folio_http_client_async()` for advanced use cases
 * **Cached reference data** - Common inventory data cached as properties for performance
 * **JSON Schema validation** - Latest FOLIO schemas fetched automatically
-* **Comprehensive error handling** - Automatic retry logic and detailed error reporting
+* **FOLIO-specific exceptions** - Meaningful error types (FolioAuthenticationError, FolioValidationError, etc.)
+* **Intelligent retry logic** - Modern [tenacity](https://github.com/jd/tenacity)-based exponential backoff with configurable limits
 
 ## Installing
 
@@ -63,19 +64,26 @@ fc = FolioClient(
 
 ### Query an endpoint in FOLIO
 ```Python
-# Basic query, limit=100
-instances = fc.folio_get("/instance-storage/instances", key="instances", query_params={"limit": 100})
+from folioclient import FolioAuthenticationError, FolioResourceNotFoundError
 
-# mod-search query for all instances without holdings records, expand all sub-objects
-instance_search = fc.folio_get(
-    "/search/instances",
-    key="instances", 
-    query='cql.allRecords=1 not holdingsId=""', 
-    query_params={
-        "expandAll": True,
-        "limit": 100
-    }
-)
+try:
+    # Basic query, limit=100
+    instances = fc.folio_get("/instance-storage/instances", key="instances", query_params={"limit": 100})
+
+    # mod-search query for all instances without holdings records, expand all sub-objects
+    instance_search = fc.folio_get(
+        "/search/instances",
+        key="instances", 
+        query='cql.allRecords=1 not holdingsId=""', 
+        query_params={
+            "expandAll": True,
+            "limit": 100
+        }
+    )
+except FolioAuthenticationError:
+    print("🔐 Authentication failed - check your credentials")
+except FolioResourceNotFoundError:
+    print("📂 Endpoint not found - check your FOLIO version")
 ```
 > NOTE: mod-search has a hard limit of 100, with a maximum offset of 900 (will only return the first 1000)
 
@@ -195,10 +203,137 @@ async with fc.get_folio_http_client_async() as client:
 
 The pre-configured clients include:
 - ✅ **Automatic authentication** with cookie-based sessions
-- ✅ **Retry logic** for transient authorization errors  
+- ✅ **Modern retry logic** powered by tenacity for robust error handling
 - ✅ **Proper FOLIO headers** (tenant, content-type)
 - ✅ **Base URL configuration** - just use relative paths
 - ✅ **SSL verification** settings from your FolioClient instance
+
+## 🚨 **FOLIO Exception System (New in v1.0.0)**
+
+FolioClient v1.0.0 introduces a comprehensive **FOLIO-specific exception hierarchy** that provides semantic context for different types of errors encountered when working with FOLIO APIs.
+
+### Exception Hierarchy
+All FOLIO exceptions inherit from `FolioError` and preserve the original HTTPX exception information:
+
+```Python
+from folioclient import (
+    # Base exceptions
+    FolioError, FolioClientClosed,
+    
+    # Connection errors  
+    FolioConnectionError, FolioSystemUnavailableError, FolioTimeoutError,
+    
+    # 4xx Client errors
+    FolioAuthenticationError,     # 401 - Invalid credentials/expired tokens
+    FolioPermissionError,         # 403 - Insufficient permissions  
+    FolioResourceNotFoundError,   # 404 - Resource doesn't exist
+    FolioValidationError,         # 422 - Data validation failures
+    FolioDataConflictError,       # 409 - Optimistic locking, duplicates
+    
+    # 5xx Server errors
+    FolioInternalServerError,     # 500 - Unexpected server errors
+    FolioBadGatewayError,         # 502 - Invalid module responses
+    FolioServiceUnavailableError, # 503 - Temporary unavailability  
+    FolioGatewayTimeoutError,     # 504 - Module response timeouts
+)
+```
+
+### Automatic Exception Handling
+**All FolioClient HTTP convenience methods automatically convert HTTPX exceptions to appropriate FOLIO exceptions:**
+
+```Python
+try:
+    # This will automatically raise FOLIO-specific exceptions
+    users = fc.folio_get("/users", query_params={"limit": 1000})
+    
+except FolioAuthenticationError:
+    print("🔐 Authentication failed - check credentials or token expiry")
+    
+except FolioPermissionError:
+    print("🚫 Insufficient permissions for this operation")
+    
+except FolioResourceNotFoundError:
+    print("📂 Resource not found - check endpoint or record ID")
+    
+except FolioValidationError as e:
+    print(f"📋 Data validation failed: {e}")
+    
+except FolioInternalServerError:
+    print("🔥 FOLIO server error - try again later")
+    
+except FolioConnectionError:
+    print("🌐 Network connectivity issue")
+```
+
+### Exception Information
+FOLIO exceptions preserve all original request/response information:
+
+```Python
+try:
+    fc.folio_post("/users", payload=invalid_user_data)
+    
+except FolioValidationError as e:
+    print(f"Status: {e.response.status_code}")
+    print(f"Error details: {e.response.text}")
+    print(f"Request URL: {e.request.url}")
+    print(f"Original cause: {e.__cause__}")  # Original httpx exception
+```
+
+### Custom Exception Handling with Decorator
+For custom functions, use the `@folio_errors` decorator to automatically convert exceptions:
+
+```Python
+from folioclient.exceptions import folio_errors
+from folioclient import FolioAuthenticationError
+import httpx
+
+@folio_errors  
+def custom_folio_request():
+    # Any httpx.HTTPStatusError will be converted to appropriate FOLIO exception
+    response = httpx.get("https://folio-instance.org/some-endpoint")
+    response.raise_for_status()
+    return response.json()
+
+# Usage
+try:
+    data = custom_folio_request()
+except FolioAuthenticationError:
+    print("Authentication issue in custom request")
+```
+
+### Built-in Retry Logic
+FolioClient includes automatic retry logic powered by the modern **tenacity** library for certain error conditions:
+
+```Python
+# Automatic retries are built into FolioClient methods for:
+# - Authorization errors (403) - triggers automatic re-login and retry
+# - Server errors (502, 503, 504) - retries with exponential backoff
+# - Connection errors - retries with exponential backoff
+# - Remote protocol errors - recreates HTTP client and retries
+# 
+# Note: Authentication errors (401) are handled automatically by FolioAuth
+
+# Configure retry behavior via environment variables:
+
+# Server error retries:
+# FOLIOCLIENT_MAX_SERVER_ERROR_RETRIES=3 (default: 0 - no retries)
+# FOLIOCLIENT_SERVER_ERROR_RETRY_DELAY=10.0 (default: 10 seconds initial delay)
+# FOLIOCLIENT_SERVER_ERROR_RETRY_FACTOR=3.0 (default: 3x exponential backoff)
+# FOLIOCLIENT_SERVER_ERROR_MAX_WAIT=unlimited (default: no cap on wait time)
+#   - Set to a number (e.g., "60") for max wait time in seconds
+#   - Set to "unlimited", "inf", or "none" for no cap
+
+# Auth error retries:
+# FOLIOCLIENT_MAX_AUTH_ERROR_RETRIES=2 (default: 0 - no retries)
+# FOLIOCLIENT_AUTH_ERROR_RETRY_DELAY=10.0 (default: 10 seconds initial delay)
+# FOLIOCLIENT_AUTH_ERROR_RETRY_FACTOR=3.0 (default: 3x exponential backoff)
+# FOLIOCLIENT_AUTH_ERROR_MAX_WAIT=60.0 (default: 60 seconds max wait)
+#   - Auth errors typically resolve quickly, so lower default cap
+
+# Legacy environment variable support (for backward compatibility):
+# SERVER_ERROR_RETRIES_MAX, SERVER_ERROR_RETRY_DELAY, SERVER_ERROR_RETRY_FACTOR
+# AUTH_ERROR_RETRIES_MAX, AUTH_ERROR_RETRY_DELAY, AUTH_ERROR_RETRY_FACTOR
+```
 
 ### Custom HTTP Requests with FOLIO Headers
 For custom HTTP implementations, access FOLIO headers with valid auth tokens:
