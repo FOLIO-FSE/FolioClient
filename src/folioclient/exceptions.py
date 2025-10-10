@@ -9,18 +9,21 @@ import functools
 import inspect
 from typing import (
     Callable,
+    ParamSpec,
     TypeVar,
     Any,
     Dict,
     Type,
     Optional,
     Union,
+    cast,
     overload,
     Awaitable,
 )
 
 import httpx
 
+P = ParamSpec("P")
 T = TypeVar("T")
 
 
@@ -387,7 +390,8 @@ def _create_folio_exception(
 
     # Handle connection errors (no response)
     if not hasattr(original_error, "response") or original_error.response is None:
-        error_type = type(original_error)
+        req_err = cast(httpx.RequestError, original_error)
+        error_type = type(req_err) # silence type checker
         if error_type in _CONNECTION_EXCEPTIONS:
             exception_class = _CONNECTION_EXCEPTIONS[error_type]
             return exception_class(str(original_error), request=original_error.request)
@@ -434,16 +438,16 @@ def _create_folio_exception(
 
 
 @overload
-def folio_errors(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
+def folio_errors(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
     ...
 
 
 @overload
-def folio_errors(func: Callable[..., T]) -> Callable[..., T]:
+def folio_errors(func: Callable[P, T]) -> Callable[P, T]:
     ...
 
 
-def folio_errors(func: Callable[..., T]) -> Callable[..., T]:
+def folio_errors(func: Callable[P, Any]) -> Callable[P, Any]:
     """
     Decorator that converts httpx exceptions to FOLIO-specific exceptions.
 
@@ -469,22 +473,22 @@ def folio_errors(func: Callable[..., T]) -> Callable[..., T]:
     if inspect.iscoroutinefunction(func):
 
         @functools.wraps(func)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> T:
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
                 return await func(*args, **kwargs)
             except (httpx.RequestError, httpx.HTTPStatusError) as e:
                 folio_exception = _create_folio_exception(e)
                 raise folio_exception from e
 
-        return async_wrapper  # type: ignore[return-value]
+        return cast(Callable[P, Awaitable[T]], async_wrapper)
     else:
 
         @functools.wraps(func)
-        def sync_wrapper(*args: Any, **kwargs: Any) -> T:
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             try:
                 return func(*args, **kwargs)
             except (httpx.RequestError, httpx.HTTPStatusError) as e:
                 folio_exception = _create_folio_exception(e)
                 raise folio_exception from e
 
-        return sync_wrapper
+        return cast(Callable[P, T], sync_wrapper)
