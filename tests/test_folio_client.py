@@ -494,8 +494,8 @@ def test_timeout_configuration():
             "test_pass",
             timeout=60.0
         )
-        
-        timeout_obj = client.http_timeout
+
+        timeout_obj = client.folio_parameters.timeout
         assert isinstance(timeout_obj, httpx.Timeout)
         assert timeout_obj.connect == 60.0
         assert timeout_obj.read == 60.0
@@ -522,7 +522,7 @@ def test_timeout_configuration_dict():
             timeout=timeout_config
         )
         
-        timeout_obj = client.http_timeout
+        timeout_obj = client.folio_parameters.timeout
         assert isinstance(timeout_obj, httpx.Timeout)
         assert timeout_obj.connect == 10.0
         assert timeout_obj.read == 120.0
@@ -544,7 +544,7 @@ def test_timeout_configuration_httpx_object():
             timeout=timeout_obj
         )
         
-        client_timeout = client.http_timeout
+        client_timeout = client.folio_parameters.timeout
         assert client_timeout is timeout_obj
         assert client_timeout.connect == 15.0
         assert client_timeout.read == 45.0
@@ -563,8 +563,8 @@ def test_timeout_configuration_none():
             "test_pass",
             timeout=None
         )
-        
-        timeout_obj = client.http_timeout
+
+        timeout_obj = client.folio_parameters.timeout
         # When no environment variables are set, should return Timeout(timeout=None)
         # This ensures httpx always gets a proper Timeout object with default behavior
         assert timeout_obj is not None
