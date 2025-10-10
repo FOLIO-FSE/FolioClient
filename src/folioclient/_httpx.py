@@ -6,7 +6,7 @@ import httpx
 
 from dataclasses import dataclass
 from http import HTTPStatus
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, Optional
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator
@@ -31,7 +31,7 @@ class FolioConnectionParameters:
     username: str
     password: str
     ssl_verify: bool
-    timeout: httpx.Timeout | None
+    timeout: httpx.Timeout
 
 
 class FolioAuth(httpx.Auth):
@@ -42,11 +42,11 @@ class FolioAuth(httpx.Auth):
     """
 
     class _Token(NamedTuple):
-        auth_token: str
-        refresh_token: str
-        expires_at: datetime | None
-        refresh_token_expires_at: datetime | None
-        cookies: httpx.Cookies | None = None
+        auth_token: Optional[str]
+        refresh_token: Optional[str]
+        expires_at: Optional[datetime]
+        refresh_token_expires_at: Optional[datetime]
+        cookies: Optional[httpx.Cookies]
 
     def __init__(self, params: FolioConnectionParameters):
         self._params = params
@@ -234,8 +234,9 @@ class FolioAuth(httpx.Auth):
 
         # Add our authentication cookies
         auth_cookies = {}
-        for name, value in self._token.cookies.items():
-            auth_cookies[name] = value
+        if self._token and self._token.cookies:
+            for name, value in self._token.cookies.items():
+                auth_cookies[name] = value
 
         # Combine all cookies
         all_cookies = {**existing_cookies, **auth_cookies}
