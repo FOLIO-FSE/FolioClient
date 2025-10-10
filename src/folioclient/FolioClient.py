@@ -2137,7 +2137,7 @@ class FolioClient:
             httpx.Client: Configured HTTP client for FOLIO API calls.
         """
         return httpx.Client(
-            timeout=self.http_timeout,
+            timeout=self.folio_parameters.timeout,
             verify=self.ssl_verify,
             base_url=self.gateway_url,
             auth=self.folio_auth,
@@ -2154,7 +2154,7 @@ class FolioClient:
             httpx.AsyncClient: Configured async HTTP client for FOLIO API calls.
         """
         return httpx.AsyncClient(
-            timeout=self.http_timeout,
+            timeout=self.folio_parameters.timeout,
             verify=self.ssl_verify,
             base_url=self.gateway_url,
             auth=self.folio_auth,
@@ -2289,7 +2289,7 @@ class FolioClient:
             req = httpx.get(
                 f_path,
                 headers=FolioClient.get_github_request_headers(),
-                timeout=self.http_timeout,
+                timeout=self.folio_parameters.timeout,
                 follow_redirects=True,
                 verify=ssl_verify,
             )
