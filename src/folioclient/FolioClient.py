@@ -7,14 +7,13 @@ import os
 import re
 from datetime import datetime
 from datetime import timezone as tz
-from typing import Any, AsyncGenerator, Dict, Generator, List, Union
+from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Union, cast
 from urllib.parse import urljoin
 from warnings import warn
 
 import httpx
 import jsonref
 import yaml
-from httpx._types import CookieTypes
 from openapi_schema_to_json_schema import to_json_schema
 
 from folioclient._httpx import FolioAuth, FolioConnectionParameters
@@ -30,7 +29,7 @@ from folioclient.exceptions import FolioClientClosed, folio_errors
 
 # Conditional import of orjson to support faster JSON processing if available
 try:
-    import orjson
+    import orjson # type: ignore
 
     if (
         os.environ.get("FOLIOCLIENT_PREFER_ORJSON", "0") != "0"
@@ -46,13 +45,13 @@ try:
         return orjson.dumps(obj).decode("utf-8")
 
     # Define exception tuples for different operations
-    JSON_DECODE_ERRORS = (json.JSONDecodeError, orjson.JSONDecodeError)
-    JSON_ENCODE_ERRORS = (TypeError, orjson.JSONEncodeError)  # If you add encoding later
+    JSON_DECODE_ERRORS = (json.JSONDecodeError, orjson.JSONDecodeError)  # type: ignore
+    JSON_ENCODE_ERRORS = (TypeError, orjson.JSONEncodeError)  # type: ignore
 
 except ImportError:
     _HAS_ORJSON = False
-    JSON_DECODE_ERRORS = (json.JSONDecodeError,)
-    JSON_ENCODE_ERRORS = (TypeError,)
+    JSON_DECODE_ERRORS = (json.JSONDecodeError,)  # type: ignore
+    JSON_ENCODE_ERRORS = (TypeError,)  # type: ignore
 
 # Constants
 CONTENT_TYPE_JSON = "application/json"
@@ -61,19 +60,28 @@ SORTBY_ID = "sortBy id"
 
 # Legacy timeout constant for backward compatibility
 try:
-    HTTPX_TIMEOUT = int(os.environ.get("FOLIOCLIENT_HTTP_TIMEOUT"))
-except TypeError:
+    timeout_str = os.environ.get("FOLIOCLIENT_HTTP_TIMEOUT")
+    HTTPX_TIMEOUT = int(timeout_str) if timeout_str is not None else None
+except (TypeError, ValueError):
     HTTPX_TIMEOUT = None
 
 RAML_UTIL_URL = "https://raw.githubusercontent.com/folio-org/raml/raml1.0"
 
 USER_AGENT_STRING = "Folio Client (https://github.com/FOLIO-FSE/FolioClient)"
 
+PROTECTED_CACHED_PROPERTIES = ["current_user", "ecs_consortium", "ecs_members"]
+
 # Set up logger
 logger = logging.getLogger("FolioClient")
 
+
 # Sentinel value for detecting unset timeout parameter
-_TIMEOUT_UNSET = object()
+class _TimeoutUnsetType:
+    def __repr__(self):
+        return "_TIMEOUT_UNSET"
+
+
+_TIMEOUT_UNSET = _TimeoutUnsetType()
 
 
 # Timeout configuration with granular control
@@ -143,31 +151,47 @@ class FolioHeadersDict(dict):
         # For all other headers, store normally
         super().__setitem__(key, value)
 
-    def update(self, other: Dict[str, str] = None) -> None:
+    def update(self, *args, **kwargs) -> None:
         """Override update to handle x-okapi-tenant specially.
-
-        Args:
-            other (Dict[str, str], optional): Dictionary of headers to update.
-                Defaults to None.
 
         Note:
             Setting x-okapi-tenant via headers is deprecated. Use
             folio_client.tenant_id instead.
         """
-        if isinstance(other, dict) and "x-okapi-tenant" in other:
-            # Handle x-okapi-tenant specially
-            tenant_id = other["x-okapi-tenant"]  # Read-only access
+        # Handle the different calling patterns for dict.update()
+        if args:
+            other = args[0]
+            if hasattr(other, 'items'):
+                # It's a mapping (dict-like)
+                if "x-okapi-tenant" in other:
+                    # Handle x-okapi-tenant specially
+                    tenant_id = other["x-okapi-tenant"]
+                    warn(
+                        "Setting x-okapi-tenant via headers is deprecated. "
+                        "Use folio_client.tenant_id = 'your_tenant' instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                    self._folio_client.tenant_id = tenant_id
+                    # Remove x-okapi-tenant from the dict we pass to super()
+                    other = {k: v for k, v in other.items() if k != "x-okapi-tenant"}
+            # Call parent with the (possibly modified) mapping/iterable
+            super().update(other)
+
+        # Handle x-okapi-tenant in kwargs
+        if "x-okapi-tenant" in kwargs:
+            tenant_id = kwargs.pop("x-okapi-tenant")
             warn(
-                "Setting x-okapi-tenant via okapi_headers is deprecated. "
+                "Setting x-okapi-tenant via headers is deprecated. "
                 "Use folio_client.tenant_id = 'your_tenant' instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
             self._folio_client.tenant_id = tenant_id
-            other = {k: v for k, v in other.items() if k != "x-okapi-tenant"}
 
-        # Update with remaining headers
-        super().update(other)
+        # Update with remaining kwargs
+        if kwargs:
+            super().update(kwargs)
 
 
 class FolioClient:
@@ -213,8 +237,8 @@ class FolioClient:
         password: str,
         *,
         ssl_verify: bool = True,
-        okapi_url: str = None,
-        timeout: float | dict | httpx.Timeout | None = _TIMEOUT_UNSET,
+        okapi_url: str | None = None,
+        timeout: float | dict | httpx.Timeout | None | _TimeoutUnsetType = _TIMEOUT_UNSET,
     ):
         if okapi_url:
             warn(
@@ -228,20 +252,22 @@ class FolioClient:
                 DeprecationWarning,
                 stacklevel=2,
             )
-        self.missing_location_codes = set()
-        self.loan_policies = {}
+        self.missing_location_codes: set[str] = set()
+        self.loan_policies: dict[str, str] = {}
         self.cql_all = "cql.allRecords=1"
 
         # Determine timeout value to use
         if timeout is _TIMEOUT_UNSET:
             # User didn't specify timeout, use environment variables
-            timeout_value = FolioClient._construct_timeout_from_env()
+            timeout_value: httpx.Timeout = FolioClient._construct_timeout_from_env()
         elif timeout is None:
             # User explicitly passed None, ignore environment variables
             timeout_value = httpx.Timeout(None)
         else:
             # User passed specific value (float, dict, or httpx.Timeout)
-            timeout_value = FolioClient._construct_timeout(timeout)
+            timeout_value = FolioClient._construct_timeout(
+                cast(float | dict | httpx.Timeout, timeout)
+            )
 
         self.folio_parameters: FolioConnectionParameters = FolioConnectionParameters(
             gateway_url=okapi_url or gateway_url,
@@ -252,8 +278,8 @@ class FolioClient:
             timeout=timeout_value,
         )
         self.folio_auth: FolioAuth = FolioAuth(self.folio_parameters)
-        self.httpx_client: httpx.Client | None = None
-        self.async_httpx_client: httpx.AsyncClient | None = None
+        # self.httpx_client: httpx.Client | None = None
+        # self.async_httpx_client: httpx.AsyncClient | None = None
         self.base_headers = {
             "content-type": CONTENT_TYPE_JSON,
         }
@@ -308,7 +334,12 @@ class FolioClient:
             This method logs out of FOLIO for the current session, invalidates any
             existing startup parameters, and marks the FolioClient instance as closed.
         """
-        if self.cookies:
+        if (
+            self.cookies
+            and hasattr(self, "httpx_client")
+            and self.httpx_client
+            and not self.httpx_client.is_closed
+        ):
             logger.info("logging out...")
             logout = self.httpx_client.post(
                 urljoin(self.gateway_url, "authn/logout"),
@@ -321,16 +352,15 @@ class FolioClient:
                     logger.warning("Logout endpoint not found, skipping logout.")
                 else:
                     logger.error(f"Logout failed: ({logout.status_code}) {logout.text}")
-            except httpx.HTTPConnectError:
+            except httpx.ConnectError:
                 logger.warning("Logout endpoint not reachable, skipping logout.")
+        else:
+            logger.debug("No active Client session found, skipping logout.")
         if hasattr(self, "httpx_client") and self.httpx_client and not self.httpx_client.is_closed:
             self.httpx_client.close()
-
+        self._cleanup_folio_parameters()
+        self._cleanup_folio_auth()
         self.is_closed = True
-        self.folio_parameters = None
-        if hasattr(self, "folio_auth"):
-            self.folio_auth._token = None
-            self.folio_auth._params = None
 
     async def __aenter__(self):
         """Asynchronous context manager entry for FolioClient.
@@ -357,7 +387,12 @@ class FolioClient:
             exc_value: Exception value if an exception occurred.
             traceback: Traceback if an exception occurred.
         """
-        if self.cookies:
+        if (
+            self.cookies
+            and hasattr(self, "async_httpx_client")
+            and self.async_httpx_client
+            and not self.async_httpx_client.is_closed
+        ):
             logger.info("logging out...")
             logout = await self.async_httpx_client.post(
                 urljoin(self.gateway_url, "authn/logout"),
@@ -370,21 +405,39 @@ class FolioClient:
                     logger.warning("Logout endpoint not found, skipping logout.")
                 else:
                     logger.error(f"Logout failed: ({logout.status_code}) {logout.text}")
-            except httpx.HTTPConnectError:
+            except httpx.ConnectError:
                 logger.warning("Logout endpoint not reachable, skipping logout.")
+        else:
+            logger.debug("No active AsyncClient session found, skipping logout.")
         if (
             hasattr(self, "async_httpx_client")
             and self.async_httpx_client
             and not self.async_httpx_client.is_closed
         ):
             await self.async_httpx_client.aclose()
-        if hasattr(self, "httpx_client") and self.httpx_client and not self.httpx_client.is_closed:
-            self.httpx_client.close()
+        try:
+            if (
+                hasattr(self, "httpx_client")
+                and self.httpx_client
+                and not self.httpx_client.is_closed
+            ):
+                self.httpx_client.close()
+            self._cleanup_folio_parameters()
+            self._cleanup_folio_auth()
+        except Exception as e:
+            logger.error(f"Error during async exit cleanup: {e}")
         self.is_closed = True
-        self.folio_parameters = None
+
+    def _cleanup_folio_auth(self):
         if hasattr(self, "folio_auth"):
-            self.folio_auth._token = None
-            self.folio_auth._params = None
+            if hasattr(self.folio_auth, "_token"):
+                del self.folio_auth._token
+            if hasattr(self.folio_auth, "_params"):
+                del self.folio_auth._params
+
+    def _cleanup_folio_parameters(self):
+        if hasattr(self, "folio_parameters"):
+            del self.folio_parameters
 
     @staticmethod
     def _construct_timeout_from_env() -> httpx.Timeout:
@@ -442,23 +495,6 @@ class FolioClient:
             stacklevel=2,
         )
         return self.gateway_url
-
-    @okapi_url.setter
-    def okapi_url(self, okapi_url: str) -> None:
-        """Setter for okapi_url property, to maintain backwards compatibility.
-
-        Note:
-            This property is deprecated. Use gateway_url instead.
-
-        Args:
-            okapi_url (str): The URL to set as the gateway URL.
-        """
-        warn(
-            "FolioClient.okapi_url is deprecated. Use gateway_url instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.gateway_url = okapi_url
 
     def close(self) -> None:
         """Manually close the FolioClient object.
@@ -583,12 +619,14 @@ class FolioClient:
 
         # Get the properties to clear
         if property_names:
-            props_to_clear = property_names
+            props_to_clear: List[str] = list(property_names)
         else:
             props_to_clear = [
                 attr_name
                 for attr_name in dir(self.__class__)
-                if not attr_name.startswith("_") and self._is_cached_property(attr_name)
+                if attr_name not in PROTECTED_CACHED_PROPERTIES
+                and not attr_name.startswith("_")
+                and self._is_cached_property(attr_name)
             ]
         # Clear each property
         for prop_name in props_to_clear:
@@ -609,15 +647,19 @@ class FolioClient:
         except AttributeError:
             return False
 
-    def _clear_single_cached_property(self, prop_name) -> None:
+    def _clear_single_cached_property(self, prop_name: str) -> None:
         """Clear a single cached property if it exists.
 
         Args:
             prop_name (str): Name of the property to clear.
         """
-        cached_attr_name = f"_{prop_name}"
-        if hasattr(self, cached_attr_name):
-            delattr(self, cached_attr_name)
+        # Verify it's actually a cached property before deleting
+        if (
+            hasattr(self.__class__, prop_name)
+            and self._is_cached_property(prop_name)
+            and hasattr(self, prop_name)
+        ):
+            delattr(self, prop_name)
 
     @cached_property
     def current_user(self) -> str:
@@ -910,7 +952,7 @@ class FolioClient:
             raise FolioClientClosed()
 
         headers = {
-            "x-okapi-token": self.okapi_token,
+            "x-okapi-token": self.access_token,
             "x-okapi-tenant": self.tenant_id,
         }
         if not self._folio_headers:
@@ -1050,17 +1092,17 @@ class FolioClient:
         if self.is_closed:
             raise FolioClientClosed()
         else:
-            _ = self.okapi_token  # Ensure token is valid
+            _ = self.access_token  # Ensure token is valid
             return self.folio_auth.folio_refresh_token
 
     @property
-    def cookies(self) -> CookieTypes:
+    def cookies(self) -> Optional[httpx.Cookies]:
         """
         Property that returns the httpx cookies object for the current session, and
         refreshes them if needed. Raises FolioClientClosed if the client is closed.
         """
         if not self.is_closed and self.folio_auth._token:
-            _ = self.okapi_token  # Ensure token is valid
+            _ = self.access_token  # Ensure token is valid
             return self.folio_auth._token.cookies
         else:
             raise FolioClientClosed()
@@ -1222,14 +1264,14 @@ class FolioClient:
             return []
 
     @property
-    def access_token_expires(self) -> datetime:
+    def access_token_expires(self) -> Optional[datetime]:
         """
         Property that returns the expiration time of the current access token.
         """
         return self.folio_auth._token.expires_at
 
     @property
-    def folio_token_expires(self) -> datetime:
+    def folio_token_expires(self) -> Optional[datetime]:
         """
         Property that returns the expiration time of the current access token.
 
@@ -1784,7 +1826,9 @@ class FolioClient:
 
     @folio_retry_on_server_error
     @folio_retry_on_auth_error
-    def folio_get(self, path, key=None, query="", query_params: dict = None) -> Any:
+    def folio_get(
+        self, path, key=None, query="", query_params: Optional[Dict[str, Any]] = None
+    ) -> Any:
         """Fetches data from FOLIO and returns it as a JSON object.
 
         Args:
@@ -1814,7 +1858,9 @@ class FolioClient:
 
     @folio_retry_on_server_error
     @folio_retry_on_auth_error
-    async def folio_get_async(self, path, key=None, query="", query_params: dict = None) -> Any:
+    async def folio_get_async(
+        self, path, key=None, query="", query_params: Optional[Dict[str, Any]] = None
+    ) -> Any:
         """Asynchronously fetches data from FOLIO and returns it as a JSON object.
 
         Args:
@@ -1834,7 +1880,9 @@ class FolioClient:
     @folio_errors
     @handle_remote_protocol_error
     @use_client_session
-    def _folio_get(self, path, key=None, query="", query_params: dict = None) -> Any:
+    def _folio_get(
+        self, path, key=None, query="", query_params: Optional[Dict[str, Any]] = None
+    ) -> Any:
         """Private method that implements folio_get.
 
         Args:
@@ -1859,7 +1907,9 @@ class FolioClient:
     @folio_errors
     @handle_remote_protocol_error
     @use_client_session
-    async def _folio_get_async(self, path, key=None, query="", query_params: dict = None) -> Any:
+    async def _folio_get_async(
+        self, path, key=None, query="", query_params: Optional[Dict[str, Any]] = None
+    ) -> Any:
         """
         Private async method that implements `folio_get_async`
         """
@@ -1877,7 +1927,9 @@ class FolioClient:
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
-    def folio_put(self, path, payload, query_params: dict = None) -> Dict[str, Any] | None:
+    def folio_put(
+        self, path, payload, query_params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any] | None:
         """Convenience method to update data in FOLIO.
 
         Args:
@@ -1916,7 +1968,7 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     async def folio_put_async(
-        self, path, payload, query_params: dict = None
+        self, path, payload, query_params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any] | None:
         """Asynchronous convenience method to update data in FOLIO.
 
@@ -1942,7 +1994,9 @@ class FolioClient:
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
-    def folio_post(self, path, payload, query_params: dict = None) -> Dict[str, Any] | None:
+    def folio_post(
+        self, path, payload, query_params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any] | None:
         """Convenience method to post data to FOLIO.
 
         Args:
@@ -1980,7 +2034,7 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     async def folio_post_async(
-        self, path, payload, query_params: dict = None
+        self, path, payload, query_params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any] | None:
         """Asynchronous convenience method to post data to FOLIO.
 
@@ -2007,7 +2061,9 @@ class FolioClient:
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
-    def folio_delete(self, path, query_params: dict = None) -> Dict[str, Any] | None:
+    def folio_delete(
+        self, path, query_params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any] | None:
         """Convenience method to delete data in FOLIO.
 
         Args:
@@ -2040,7 +2096,9 @@ class FolioClient:
     @folio_retry_on_auth_error
     @handle_remote_protocol_error
     @use_client_session
-    async def folio_delete_async(self, path, query_params: dict = None) -> Dict[str, Any] | None:
+    async def folio_delete_async(
+        self, path, query_params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any] | None:
         """Asynchronous convenience method to delete data in FOLIO
 
         Args:
@@ -2370,7 +2428,7 @@ class FolioClient:
         url = f"/users/{user['id']}"
         print(url)
         try:
-            _ = self.folio_put(url, user)
+            return self.folio_put(url, user)
         except httpx.HTTPStatusError as exc:
             print(f"Error updating user {user['username']}: {exc}")
             raise
