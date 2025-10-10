@@ -7,7 +7,17 @@ to give meaningful error context for library management system operations.
 
 import functools
 import inspect
-from typing import Callable, TypeVar, Any, Dict, Type, Optional, Union
+from typing import (
+    Callable,
+    TypeVar,
+    Any,
+    Dict,
+    Type,
+    Optional,
+    Union,
+    overload,
+    Awaitable,
+)
 
 import httpx
 
@@ -394,8 +404,8 @@ def _create_folio_exception(
 
         # Check for specific status code mappings
         if status_code in _HTTP_STATUS_EXCEPTIONS:
-            exception_class = _HTTP_STATUS_EXCEPTIONS[status_code]
-            return exception_class(
+            http_exception_class: Type[FolioHTTPError] = _HTTP_STATUS_EXCEPTIONS[status_code]
+            return http_exception_class(
                 error_detail, request=original_error.request, response=original_error.response
             )
 
@@ -421,6 +431,16 @@ def _create_folio_exception(
 
     # Fallback for any other request errors
     return FolioError(f"Unexpected FOLIO error: {original_error}")
+
+
+@overload
+def folio_errors(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
+    ...
+
+
+@overload
+def folio_errors(func: Callable[..., T]) -> Callable[..., T]:
+    ...
 
 
 def folio_errors(func: Callable[..., T]) -> Callable[..., T]:
@@ -456,7 +476,7 @@ def folio_errors(func: Callable[..., T]) -> Callable[..., T]:
                 folio_exception = _create_folio_exception(e)
                 raise folio_exception from e
 
-        return async_wrapper
+        return async_wrapper  # type: ignore[return-value]
     else:
 
         @functools.wraps(func)
