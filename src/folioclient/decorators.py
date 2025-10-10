@@ -38,7 +38,7 @@ def should_retry_auth_error(exc):
     is an HTTPStatusError with a status code of 403,
     the function returns true.
 
-    parmeters:
+    parameters:
         exc: The exception raised by the request
 
     returns:
@@ -102,7 +102,7 @@ def get_server_retry_config() -> dict:
 
     # Convert max_retries to attempts (add 1 for initial attempt)
     max_retries = int(
-        os.environ.get("FOLIOCLIENT_MAX_SERVER_ERROR_RETRIES", None)
+        os.environ.get("FOLIOCLIENT_MAX_SERVER_ERROR_RETRIES", "")
         or os.environ.get("SERVER_ERROR_RETRIES_MAX", "0")
     )
     max_attempts = max_retries + 1  # Convert retries to total attempts
@@ -111,12 +111,12 @@ def get_server_retry_config() -> dict:
         "stop": stop_after_attempt(max_attempts),
         "wait": wait_exponential(
             multiplier=float(
-                os.environ.get("FOLIOCLIENT_SERVER_ERROR_RETRY_DELAY", None)
+                os.environ.get("FOLIOCLIENT_SERVER_ERROR_RETRY_DELAY", "")
                 or os.environ.get("SERVER_ERROR_RETRY_DELAY", "10.0")
             ),
             max=max_wait,  # Now configurable: unlimited by default, or specify a cap
             exp_base=float(
-                os.environ.get("FOLIOCLIENT_SERVER_ERROR_RETRY_FACTOR", None)
+                os.environ.get("FOLIOCLIENT_SERVER_ERROR_RETRY_FACTOR", "")
                 or os.environ.get("SERVER_ERROR_RETRY_FACTOR", "3.0")
             ),
         ),
@@ -143,7 +143,7 @@ def get_auth_retry_config() -> dict:
 
     # Convert max_retries to attempts (add 1 for initial attempt)
     max_retries = int(
-        os.environ.get("FOLIOCLIENT_MAX_AUTH_ERROR_RETRIES", None)
+        os.environ.get("FOLIOCLIENT_MAX_AUTH_ERROR_RETRIES", "")
         or os.environ.get("AUTH_ERROR_RETRIES_MAX", "0")
     )
     max_attempts = max_retries + 1  # Convert retries to total attempts
@@ -152,12 +152,12 @@ def get_auth_retry_config() -> dict:
         "stop": stop_after_attempt(max_attempts),
         "wait": wait_exponential(
             multiplier=float(
-                os.environ.get("FOLIOCLIENT_AUTH_ERROR_RETRY_DELAY", None)
+                os.environ.get("FOLIOCLIENT_AUTH_ERROR_RETRY_DELAY", "")
                 or os.environ.get("AUTH_ERROR_RETRY_DELAY", "10.0")
             ),
             max=auth_max_wait,  # Configurable: 60s default, or specify cap/unlimited
             exp_base=float(
-                os.environ.get("FOLIOCLIENT_AUTH_ERROR_RETRY_FACTOR", None)
+                os.environ.get("FOLIOCLIENT_AUTH_ERROR_RETRY_FACTOR", "")
                 or os.environ.get("AUTH_ERROR_RETRY_FACTOR", "3.0")
             ),
         ),
