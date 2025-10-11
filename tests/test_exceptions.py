@@ -437,3 +437,19 @@ class TestExceptionChaining:
         assert exc_info.value.__cause__ is not None
         assert isinstance(exc_info.value.__cause__, httpx.HTTPStatusError)
         assert str(exc_info.value.__cause__) == "Server error"
+
+    def test_create_folio_exception_unexpected_folio_error(self):
+        # Create an object that has a response attribute but is not an HTTPStatusError
+        class WeirdError(Exception):
+            def __init__(self, request=None, response=None):
+                self.request = request
+                self.response = response
+
+        request = Mock(spec=httpx.Request)
+        response = Mock(spec=httpx.Response)
+        response.status_code = 999
+        original = WeirdError(request=request, response=response)
+
+        folio_err = _create_folio_exception(original)  # type: ignore[arg-type]
+        assert isinstance(folio_err, FolioError)
+        assert "Unexpected FOLIO error" in str(folio_err)
