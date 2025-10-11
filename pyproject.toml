@@ -108,3 +108,7 @@ docstring-code-line-length = "dynamic"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "integration: mark the test as an integration test.",
+    "ecs: mark test as ECS functionality test.",
+]
