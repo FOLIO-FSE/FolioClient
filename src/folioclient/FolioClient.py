@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime
 from datetime import timezone as tz
-from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Union, cast
+from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Union, cast, TYPE_CHECKING
 from urllib.parse import urljoin
 from warnings import warn
 
@@ -27,9 +27,13 @@ from folioclient.decorators import (
 )
 from folioclient.exceptions import FolioClientClosed, folio_errors
 
+if TYPE_CHECKING:  # pragma: no cover
+    import ssl
+
+
 # Conditional import of orjson to support faster JSON processing if available
-try:
-    import orjson # type: ignore
+try:  # pragma: no cover # TODO: remove pragma when this is out of beta
+    import orjson  # type: ignore
 
     if (
         os.environ.get("FOLIOCLIENT_PREFER_ORJSON", "0") != "0"
@@ -161,7 +165,7 @@ class FolioHeadersDict(dict):
         # Handle the different calling patterns for dict.update()
         if args:
             other = args[0]
-            if hasattr(other, 'items'):
+            if hasattr(other, "items"):
                 # It's a mapping (dict-like)
                 if "x-okapi-tenant" in other:
                     # Handle x-okapi-tenant specially
@@ -224,7 +228,7 @@ class FolioClient:
         tenant_id (str): The tenant ID for the FOLIO instance.
         username (str): The username for authentication.
         password (str): The password for authentication.
-        ssl_verify (bool): Whether to verify SSL certificates. Default is True.
+        ssl_verify (bool | ssl.SSLContext): Whether to verify SSL certificates, or a custom SSL context. Default is True.
         okapi_url (keyword-only, str, optional): Deprecated. Use gateway_url instead.
         timeout (float | dict | httpx.Timeout | None, optional): Timeout configuration for HTTP requests.
     """  # noqa: E501
@@ -236,19 +240,13 @@ class FolioClient:
         username: str,
         password: str,
         *,
-        ssl_verify: bool = True,
+        ssl_verify: bool | ssl.SSLContext = True,
         okapi_url: str | None = None,
         timeout: float | dict | httpx.Timeout | None | _TimeoutUnsetType = _TIMEOUT_UNSET,
     ):
         if okapi_url:
             warn(
                 "okapi_url argument is deprecated. Use gateway_url instead. Support for okapi_url will be removed in a future release.",  # noqa: E501
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        if not ssl_verify:
-            warn(
-                "ssl_verify argument is deprecated. It will be removed in a future release.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -278,8 +276,6 @@ class FolioClient:
             timeout=timeout_value,
         )
         self.folio_auth: FolioAuth = FolioAuth(self.folio_parameters)
-        # self.httpx_client: httpx.Client | None = None
-        # self.async_httpx_client: httpx.AsyncClient | None = None
         self.base_headers = {
             "content-type": CONTENT_TYPE_JSON,
         }
@@ -344,16 +340,7 @@ class FolioClient:
             logout = self.httpx_client.post(
                 urljoin(self.gateway_url, "authn/logout"),
             )
-            try:
-                logout.raise_for_status()
-                logger.info("Logged out")
-            except httpx.HTTPStatusError:
-                if logout.status_code == 404:
-                    logger.warning("Logout endpoint not found, skipping logout.")
-                else:
-                    logger.error(f"Logout failed: ({logout.status_code}) {logout.text}")
-            except httpx.ConnectError:
-                logger.warning("Logout endpoint not reachable, skipping logout.")
+            self.logout_response_handler(logout)
         else:
             logger.debug("No active Client session found, skipping logout.")
         if hasattr(self, "httpx_client") and self.httpx_client and not self.httpx_client.is_closed:
@@ -361,6 +348,18 @@ class FolioClient:
         self._cleanup_folio_parameters()
         self._cleanup_folio_auth()
         self.is_closed = True
+
+    def logout_response_handler(self, logout):
+        try:
+            logout.raise_for_status()
+            logger.info("Logged out")
+        except httpx.HTTPStatusError:
+            if logout.status_code == 404:
+                logger.warning("Logout endpoint not found, skipping logout.")
+            else:
+                logger.error(f"Logout failed: ({logout.status_code}) {logout.text}")
+        except httpx.ConnectError:
+            logger.warning("Logout endpoint not reachable, skipping logout.")
 
     async def __aenter__(self):
         """Asynchronous context manager entry for FolioClient.
@@ -397,16 +396,7 @@ class FolioClient:
             logout = await self.async_httpx_client.post(
                 urljoin(self.gateway_url, "authn/logout"),
             )
-            try:
-                logout.raise_for_status()
-                logger.info("Logged out")
-            except httpx.HTTPStatusError:
-                if logout.status_code == 404:
-                    logger.warning("Logout endpoint not found, skipping logout.")
-                else:
-                    logger.error(f"Logout failed: ({logout.status_code}) {logout.text}")
-            except httpx.ConnectError:
-                logger.warning("Logout endpoint not reachable, skipping logout.")
+            self.logout_response_handler(logout)
         else:
             logger.debug("No active AsyncClient session found, skipping logout.")
         if (
@@ -569,17 +559,12 @@ class FolioClient:
         return self.folio_parameters.gateway_url
 
     @property
-    def ssl_verify(self) -> bool:
-        """Whether SSL verification is enabled [DEPRECATED].
+    def ssl_verify(self) -> bool | ssl.SSLContext:
+        """Whether SSL verification is enabled
 
         This is a convenience property that returns the ssl_verify value from the
         FolioConnectionParameters.
         """
-        warn(
-            "FolioClient.ssl_verify is deprecated and will be removed in a future release.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return self.folio_parameters.ssl_verify
 
     @property
@@ -922,6 +907,10 @@ class FolioClient:
         """
         return list(self.folio_get_all("/subject-types", "subjectTypes", self.cql_all, 1000))
 
+    def validate_client_open(self):
+        if self.is_closed:
+            raise FolioClientClosed()
+
     @property
     def folio_headers(self) -> Dict[str, str]:
         """
@@ -948,8 +937,7 @@ class FolioClient:
         Returns:
             FolioHeadersDict: The FOLIO headers with special x-okapi-tenant handling.
         """
-        if self.is_closed:
-            raise FolioClientClosed()
+        self.validate_client_open()
 
         headers = {
             "x-okapi-token": self.access_token,
@@ -970,8 +958,7 @@ class FolioClient:
         Parameters:
             headers_dict (Dict[str, str]): Dictionary of headers to set
         """
-        if self.is_closed:
-            raise FolioClientClosed()
+        self.validate_client_open()
 
         new_headers = FolioHeadersDict(self)
         new_headers.update(headers_dict)
@@ -983,9 +970,7 @@ class FolioClient:
         Deleter for folio_headers that clears the private _folio_headers dictionary, which will
         revert folio_headers to using base_headers
         """
-        if self.is_closed:
-            raise FolioClientClosed()
-
+        self.validate_client_open()
         self._folio_headers.clear()
 
     @property
@@ -1082,18 +1067,14 @@ class FolioClient:
         Returns:
             str: The access token.
         """
-        if not self.is_closed:
-            return self.folio_auth.folio_auth_token
-        else:
-            raise FolioClientClosed()
+        self.validate_client_open()
+        return self.folio_auth.folio_auth_token
 
     @property
     def refresh_token(self) -> str:
-        if self.is_closed:
-            raise FolioClientClosed()
-        else:
-            _ = self.access_token  # Ensure token is valid
-            return self.folio_auth.folio_refresh_token
+        self.validate_client_open()
+        _ = self.access_token  # Ensure token is valid
+        return self.folio_auth.folio_refresh_token
 
     @property
     def cookies(self) -> Optional[httpx.Cookies]:
@@ -1101,11 +1082,9 @@ class FolioClient:
         Property that returns the httpx cookies object for the current session, and
         refreshes them if needed. Raises FolioClientClosed if the client is closed.
         """
-        if not self.is_closed and self.folio_auth._token:
-            _ = self.access_token  # Ensure token is valid
-            return self.folio_auth._token.cookies
-        else:
-            raise FolioClientClosed()
+        self.validate_client_open()
+        _ = self.access_token  # Ensure token is valid
+        return self.folio_auth._token.cookies
 
     def _initial_ecs_check(self) -> None:
         """Check if initial tenant_id value is an ECS central tenant ID.
@@ -1297,13 +1276,11 @@ class FolioClient:
         Raises:
             FolioClientClosed: If the client has been closed.
         """
-        if not self.is_closed:
-            with self.folio_auth._lock:
-                self.folio_auth._token = (
-                    self.folio_auth._do_sync_auth()
-                )  # Force re-authentication if needed
-        else:
-            raise FolioClientClosed()
+        self.validate_client_open()
+        with self.folio_auth._lock:
+            self.folio_auth._token = (
+                self.folio_auth._do_sync_auth()
+            )  # Force re-authentication if needed
 
     @folio_retry_on_server_error
     async def async_login(self) -> None:
@@ -1316,11 +1293,9 @@ class FolioClient:
         Raises:
             FolioClientClosed: If the client has been closed.
         """
-        if not self.is_closed:
-            with self.folio_auth._lock:
-                self.folio_auth._token = await self.folio_auth._do_async_auth()
-        else:
-            raise FolioClientClosed()
+        self.validate_client_open()
+        with self.folio_auth._lock:
+            self.folio_auth._token = await self.folio_auth._do_async_auth()
 
     def logout(self) -> None:
         """Alias for close method.
@@ -1328,10 +1303,8 @@ class FolioClient:
         Raises:
             FolioClientClosed: If the client has already been closed.
         """
-        if not self.is_closed:
-            self.close()
-        else:
-            raise FolioClientClosed()
+        self.validate_client_open()
+        self.close()
 
     async def async_logout(self) -> None:
         """Alias for async_close method.
@@ -1339,10 +1312,8 @@ class FolioClient:
         Raises:
             FolioClientClosed: If the client has already been closed.
         """
-        if not self.is_closed:
-            await self.async_close()
-        else:
-            raise FolioClientClosed()
+        self.validate_client_open()
+        await self.async_close()
 
     def build_url(self, path: str) -> str:
         """Build complete URL from gateway URL and path.
@@ -2138,7 +2109,7 @@ class FolioClient:
         """
         return httpx.Client(
             timeout=self.folio_parameters.timeout,
-            verify=self.ssl_verify,
+            verify=self.folio_parameters.ssl_verify,
             base_url=self.gateway_url,
             auth=self.folio_auth,
             headers=self.base_headers,
@@ -2155,7 +2126,7 @@ class FolioClient:
         """
         return httpx.AsyncClient(
             timeout=self.folio_parameters.timeout,
-            verify=self.ssl_verify,
+            verify=self.folio_parameters.ssl_verify,
             base_url=self.gateway_url,
             auth=self.folio_auth,
             headers=self.base_headers,

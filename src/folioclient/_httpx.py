@@ -8,8 +8,9 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import TYPE_CHECKING, NamedTuple, Optional
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from collections.abc import AsyncGenerator, Generator
+    import ssl
 
 
 @dataclass(frozen=True)
@@ -30,7 +31,7 @@ class FolioConnectionParameters:
     tenant_id: str
     username: str
     password: str
-    ssl_verify: bool
+    ssl_verify: bool | ssl.SSLContext
     timeout: httpx.Timeout
 
 

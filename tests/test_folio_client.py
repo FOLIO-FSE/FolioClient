@@ -183,7 +183,14 @@ def test_okapi_headers_contain_required_fields(mock_ecs_check):
         mock_folio_auth.return_value = mock_auth_instance
         
         fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
-        headers = fc.okapi_headers
+        # The `okapi_headers` property is deprecated — capture the warning and
+        # validate both the message and the returned headers content.
+        with pytest.warns(DeprecationWarning) as record:
+            headers = fc.okapi_headers
+        # Ensure a single DeprecationWarning was raised with the expected text
+        assert len(record) == 1
+        assert "FolioClient.okapi_headers is deprecated. Use folio_headers instead." in str(record[0].message)
+
         assert "content-type" in headers
         assert headers["content-type"] == "application/json"
         assert "x-okapi-token" in headers
@@ -227,7 +234,7 @@ def test_ssl_verify_can_be_set_false(mock_ecs_check):
     with folio_auth_patch() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
-        
+
         fc = FolioClient("https://example.com", "tenant", "user", "pass", ssl_verify=False)
         assert fc.ssl_verify is False
 
@@ -249,7 +256,12 @@ def test_okapi_url_property_same_as_gateway_url(mock_ecs_check):
         mock_folio_auth.return_value = mock_auth_instance
         
         fc = FolioClient("https://example.com", "tenant", "user", "pass")
-        assert fc.okapi_url == fc.gateway_url
+        # The `okapi_url` property is deprecated — capture the warning and
+        # validate the message and returned value.
+        with pytest.warns(DeprecationWarning) as record:
+            assert fc.okapi_url == fc.gateway_url
+        assert len(record) == 1
+        assert "FolioClient.okapi_url is deprecated. Use gateway_url instead." in str(record[0].message)
 
 
 @patch.object(FolioClient, '_initial_ecs_check')
@@ -322,7 +334,7 @@ def test_context_manager_closes_client():
                 mock_httpx_client = Mock()
                 mock_httpx_client.is_closed = False
                 fc.httpx_client = mock_httpx_client
-                
+
                 assert fc.is_closed is False
             # After exiting the context, it should be closed
             assert fc.is_closed is True
@@ -338,6 +350,10 @@ async def test_async_context_manager_closes_client():
             # Create an AsyncMock for the async httpx client
             async_mock_client = AsyncMock()
             async_mock_client.is_closed = False
+            # Make post() return a plain mock response with a synchronous raise_for_status()
+            mock_logout_response = Mock()
+            mock_logout_response.raise_for_status.return_value = None
+            async_mock_client.post.return_value = mock_logout_response
             
             with patch.object(FolioClient, 'get_folio_http_client_async', return_value=async_mock_client):
                 async with FolioClient("https://example.com", "tenant", "user", "pass") as fc:
@@ -345,7 +361,7 @@ async def test_async_context_manager_closes_client():
                     mock_httpx_client = Mock()
                     mock_httpx_client.is_closed = False
                     fc.httpx_client = mock_httpx_client
-                    
+
                     assert fc.is_closed is False
                 # After exiting the async context, it should be closed
                 assert fc.is_closed is True
@@ -447,6 +463,126 @@ def test_get_folio_http_client_async_returns_async_client(mock_ecs_check):
         assert async_client is not None
         assert hasattr(async_client, "get")
         assert hasattr(async_client, "post")
+
+
+@patch.object(FolioClient, '_initial_ecs_check')
+def test_folio_headers_update_handles_x_okapi_tenant(mock_ecs_check):
+    """Ensure updating headers with x-okapi-tenant warns and updates tenant_id."""
+    with folio_auth_patch() as mock_folio_auth:
+        mock_auth_instance = Mock()
+        mock_auth_instance.tenant_id = "initial"
+        mock_folio_auth.return_value = mock_auth_instance
+
+        fc = FolioClient("https://example.com", "initial", "user", "pass")
+
+        # Using mapping form
+        with pytest.warns(DeprecationWarning):
+            fc._folio_headers.update({"x-okapi-tenant": "new-tenant", "x-test": "v"})
+
+        assert fc.tenant_id == "new-tenant"
+        assert "x-okapi-tenant" not in fc._folio_headers
+        assert fc._folio_headers.get("x-test") == "v"
+
+        # Using kwargs form
+        with pytest.warns(DeprecationWarning):
+            fc._folio_headers.update(**{"x-okapi-tenant": "another-tenant"})
+
+        assert fc.tenant_id == "another-tenant"
+
+
+@patch.object(FolioClient, '_initial_ecs_check')
+def test_logout_response_handler_branches(mock_ecs_check):
+    """Exercise logout_response_handler exception handling for 404, other HTTP errors, and ConnectError."""
+    with folio_auth_patch() as mock_folio_auth:
+        mock_auth_instance = Mock()
+        mock_auth_instance.tenant_id = "t"
+        mock_folio_auth.return_value = mock_auth_instance
+
+        fc = FolioClient("https://example.com", "t", "user", "pass")
+
+        # 404 HTTPStatusError path
+        mock_resp_404 = Mock()
+        mock_resp_404.status_code = 404
+        err_404 = httpx.HTTPStatusError("404", request=Mock(), response=mock_resp_404)
+        mock_resp_404.raise_for_status.side_effect = err_404
+        # Should not raise
+        fc.logout_response_handler(mock_resp_404)
+
+        # 500 HTTPStatusError path
+        mock_resp_500 = Mock()
+        mock_resp_500.status_code = 500
+        mock_resp_500.text = "oops"
+        err_500 = httpx.HTTPStatusError("500", request=Mock(), response=mock_resp_500)
+        mock_resp_500.raise_for_status.side_effect = err_500
+        fc.logout_response_handler(mock_resp_500)
+
+        # ConnectError path
+        mock_conn = Mock()
+        mock_conn.raise_for_status.side_effect = httpx.ConnectError("nope")
+        fc.logout_response_handler(mock_conn)
+
+
+@patch.object(FolioClient, '_initial_ecs_check')
+def test_current_user_fallbacks_and_failure(mock_ecs_check):
+    """Test current_user primary path, fallback to /users, and final failure returning empty string."""
+    with folio_auth_patch() as mock_folio_auth:
+        mock_auth_instance = Mock()
+        mock_auth_instance.tenant_id = "t"
+        mock_folio_auth.return_value = mock_auth_instance
+
+        fc = FolioClient("https://example.com", "t", "user", "pass")
+
+        # Primary path: _folio_get returns dict with id
+        def primary(path, *args, **kwargs):
+            if path.startswith("/bl-users"):
+                return {"id": "abcd"}
+            raise RuntimeError("unexpected")
+
+        fc._folio_get = primary
+        # cached_property stores value; ensure fresh instance usage by deleting attribute if present
+        if hasattr(fc, "current_user"):
+            delattr(fc, "current_user")
+        assert fc.current_user == "abcd"
+
+        # Fallback path: first call raises HTTPStatusError, second returns list
+        def fallback(path, *args, **kwargs):
+            if path.startswith("/bl-users"):
+                raise httpx.HTTPStatusError("no bl-users", request=Mock(), response=Mock())
+            if path == "/users":
+                return [{"id": "from-users"}]
+            raise RuntimeError()
+
+        fc2 = FolioClient("https://example.com", "t", "user", "pass")
+        fc2._folio_get = fallback
+        if hasattr(fc2, "current_user"):
+            delattr(fc2, "current_user")
+        assert fc2.current_user == "from-users"
+
+        # Failure path: both attempts raise
+        def failure(path, *args, **kwargs):
+            raise Exception("fail")
+
+        fc3 = FolioClient("https://example.com", "t", "user", "pass")
+        fc3._folio_get = failure
+        if hasattr(fc3, "current_user"):
+            delattr(fc3, "current_user")
+        assert fc3.current_user == ""
+
+
+def test_construct_timeout_merge_with_defaults(monkeypatch):
+    """Test that _construct_timeout merges provided dict with TIMEOUT_CONFIG defaults."""
+    # Temporarily set TIMEOUT_CONFIG in the FolioClient module
+    import importlib
+    fc_module = importlib.import_module("folioclient.FolioClient")
+    monkeypatch.setattr(fc_module, "TIMEOUT_CONFIG", {"read": 11.0})
+
+    # Provide a dict that overrides connect only
+    t = fc_module.FolioClient._construct_timeout({"connect": 2.0})
+    assert isinstance(t, httpx.Timeout)
+    # Provided value used, default read used
+    assert t.connect == 2.0
+    assert t.read == 11.0
+
 
 
 def test_handle_delete_response_raises_httpx_exceptions():
@@ -572,6 +708,26 @@ def test_timeout_configuration_none():
         assert timeout_obj.read is None
         assert timeout_obj.write is None
         assert timeout_obj.pool is None
+
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_validate_client_open_behavior(mock_ecs_check):
+        """Validate that validate_client_open() raises when client is closed and is a no-op when open."""
+        with folio_auth_patch() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_folio_auth.return_value = mock_auth_instance
+
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+
+            # Should be no-op when client is open
+            fc.is_closed = False
+            # Should not raise
+            fc.validate_client_open()
+
+            # When closed, should raise FolioClientClosed
+            fc.is_closed = True
+            with pytest.raises(FolioClientClosed):
+                fc.validate_client_open()
 
 
 def test_http_client_creation_with_timeout():
