@@ -439,12 +439,12 @@ def _create_folio_exception(
 
 @overload
 def folio_errors(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
-    ...
+    ...  # pragma: no cover
 
 
 @overload
 def folio_errors(func: Callable[P, T]) -> Callable[P, T]:
-    ...
+    ...  # pragma: no cover
 
 
 def folio_errors(func: Callable[P, Any]) -> Callable[P, Any]:
