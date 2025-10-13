@@ -55,6 +55,10 @@ class DummyAsyncClient(DummyClient):
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
+    # Mimic async generator for async_auth_flow
+    async def async_auth_flow(self, req):
+        yield req
+
 
 def make_params():
     return FolioConnectionParameters(
@@ -76,8 +80,15 @@ def test_do_sync_auth_and_token_properties(monkeypatch):
     resp = DummyResponse(cookies=cookies, json_data={"accessTokenExpiration": expires})
 
 
+
+    class PatchedDummyClient(DummyClient):
+        def post(self, url, *args, **kwargs):
+            if "/authn/login-with-expiry" in url:
+                return resp
+            return DummyResponse(status_code=404)
+
     def dummy_client_factory(*args, **kwargs):
-        return DummyClient(resp)
+        return PatchedDummyClient()
     monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
     fa = FolioAuth(params)
@@ -96,10 +107,23 @@ async def test_do_async_auth_and_cookie_header(monkeypatch):
     resp = DummyResponse(cookies=cookies, json_data={"accessTokenExpiration": expires})
 
 
+
+    class PatchedDummyClient(DummyClient):
+        def post(self, url, *args, **kwargs):
+            if "/authn/login-with-expiry" in url:
+                return resp
+            return DummyResponse(status_code=404)
+
+    class PatchedDummyAsyncClient(DummyAsyncClient):
+        async def post(self, url, *args, **kwargs):
+            if "/authn/login-with-expiry" in url:
+                return resp
+            return DummyResponse(status_code=404)
+
     def dummy_client_factory(*args, **kwargs):
-        return DummyClient(resp)
+        return PatchedDummyClient()
     def dummy_async_client_factory(*args, **kwargs):
-        return DummyAsyncClient(resp)
+        return PatchedDummyAsyncClient()
     monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", dummy_async_client_factory)
     monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
@@ -122,8 +146,15 @@ def test_token_is_expiring_and_reset_tenant(monkeypatch):
     resp = DummyResponse(cookies=cookies, json_data={})
 
 
+
+    class PatchedDummyClient(DummyClient):
+        def post(self, url, *args, **kwargs):
+            if "/authn/login-with-expiry" in url:
+                return resp
+            return DummyResponse(status_code=404)
+
     def dummy_client_factory(*args, **kwargs):
-        return DummyClient(resp)
+        return PatchedDummyClient()
     monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
     fa = FolioAuth(params)
@@ -145,8 +176,15 @@ def test_sync_auth_flow_refresh_success(monkeypatch):
     auth_resp = DummyResponse(cookies=auth_cookies, json_data={})
 
 
+
+    class PatchedDummyClient(DummyClient):
+        def post(self, url, *args, **kwargs):
+            if "/authn/login-with-expiry" in url:
+                return auth_resp
+            return DummyResponse(status_code=404)
+
     def dummy_client_factory(*args, **kwargs):
-        return DummyClient(auth_resp)
+        return PatchedDummyClient()
     monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
     fa = FolioAuth(params)
@@ -172,8 +210,15 @@ def test_sync_auth_flow_refresh_still_unauthorized(monkeypatch):
     auth_resp = DummyResponse(cookies=auth_cookies, json_data={})
 
 
+
+    class PatchedDummyClient(DummyClient):
+        def post(self, url, *args, **kwargs):
+            if "/authn/login-with-expiry" in url:
+                return auth_resp
+            return DummyResponse(status_code=404)
+
     def dummy_client_factory(*args, **kwargs):
-        return DummyClient(auth_resp)
+        return PatchedDummyClient()
     monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
     fa = FolioAuth(params)
@@ -195,10 +240,23 @@ async def test_async_auth_flow_refresh_success(monkeypatch):
     auth_resp = DummyResponse(cookies=auth_cookies, json_data={})
 
 
+
+    class PatchedDummyClient(DummyClient):
+        def post(self, url, *args, **kwargs):
+            if "/authn/login-with-expiry" in url:
+                return auth_resp
+            return DummyResponse(status_code=404)
+
+    class PatchedDummyAsyncClient(DummyAsyncClient):
+        async def post(self, url, *args, **kwargs):
+            if "/authn/login-with-expiry" in url:
+                return auth_resp
+            return DummyResponse(status_code=404)
+
     def dummy_client_factory(*args, **kwargs):
-        return DummyClient(auth_resp)
+        return PatchedDummyClient()
     def dummy_async_client_factory(*args, **kwargs):
-        return DummyAsyncClient(auth_resp)
+        return PatchedDummyAsyncClient()
     monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
     monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", dummy_async_client_factory)
 
