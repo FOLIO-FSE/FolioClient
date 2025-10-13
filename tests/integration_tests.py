@@ -38,18 +38,22 @@ SNAPSHOT_CONFIG = {
     "password": "admin",
 }
 
+# pragma: warning disable=SC2068
 SNAPSHOT2_CONFIG = {
     "gateway_url": "https://folio-snapshot-2-okapi.dev.folio.org",
 }
 
+# pragma: warning disable=SC2068
 SNAPSHOT_EUREKA_CONFIG = {
     "gateway_url": "https://folio-etesting-snapshot-kong.ci.folio.org"
 }
 
+# pragma: warning disable=SC2068
 SNAPSHOT_2_EUREKA_CONFIG = {
     "gateway_url": "https://folio-etesting-snapshot2-kong.ci.folio.org"
 }
 
+# pragma: warning disable=SC2068
 SNAPSHOT_EUREKA_ECS_CONFIG = {
     "gateway_url": "https://ecs-folio-etesting-snapshot-kong.ci.folio.org",
     "tenant_id": "consortium",
@@ -57,13 +61,14 @@ SNAPSHOT_EUREKA_ECS_CONFIG = {
     "password": "admin",
 }
 
+# pragma: warning disable=SC2068
 BUGFEST_CONFIG = {
     "gateway_url": "https://kong-bugfest-sunflower.int.aws.folio.org",
     "tenant_id": "fs09000000",
     "username": "folio",
     "password": "folio",
 }
-# pragma: warning enable=SC2068
+
 
 # Pytest markers
 pytestmark = pytest.mark.integration
