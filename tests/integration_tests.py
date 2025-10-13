@@ -31,11 +31,13 @@ from folioclient.exceptions import (
 
 # Test configuration
 # pragma: warning disable=SC2068
+import os
+
 SNAPSHOT_CONFIG = {
     "gateway_url": "https://folio-snapshot-okapi.dev.folio.org",
     "tenant_id": "diku",
-    "username": "diku_admin",
-    "password": "admin",
+    "username": os.environ.get("FOLIO_SNAPSHOT_USERNAME", "diku_admin"),
+    "password": os.environ.get("FOLIO_SNAPSHOT_PASSWORD", "admin"),
 }
 
 # pragma: warning disable=SC2068
@@ -57,16 +59,16 @@ SNAPSHOT_2_EUREKA_CONFIG = {
 SNAPSHOT_EUREKA_ECS_CONFIG = {
     "gateway_url": "https://ecs-folio-etesting-snapshot-kong.ci.folio.org",
     "tenant_id": "consortium",
-    "username": "consortium_admin",
-    "password": "admin",
+    "username": os.environ.get("FOLIO_EUREKA_USERNAME", "consortium_admin"),
+    "password": os.environ.get("FOLIO_EUREKA_PASSWORD", "admin"),
 }
 
 # pragma: warning disable=SC2068
 BUGFEST_CONFIG = {
     "gateway_url": "https://kong-bugfest-sunflower.int.aws.folio.org",
     "tenant_id": "fs09000000",
-    "username": "folio",
-    "password": "folio",
+    "username": os.environ.get("FOLIO_BUGFEST_USERNAME", "folio"),
+    "password": os.environ.get("FOLIO_BUGFEST_PASSWORD", "folio"),
 }
 
 

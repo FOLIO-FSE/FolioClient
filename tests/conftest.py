@@ -13,7 +13,12 @@ def pytest_addoption(parser):
         default=False,
         help="Run integration tests against FOLIO snapshot",
     )
-
+    parser.addoption(
+        "--integration-server",
+        action="store",
+        default=None,
+        help="Limit integration tests to a single server config name"
+    )
 
 def pytest_collection_modifyitems(config, items):
     """Skip integration tests unless --run-integration is passed."""
