@@ -30,6 +30,7 @@ from folioclient.exceptions import (
 
 
 # Test configuration
+# pragma: warning disable=SC2068
 SNAPSHOT_CONFIG = {
     "gateway_url": "https://folio-snapshot-okapi.dev.folio.org",
     "tenant_id": "diku",
@@ -45,12 +46,24 @@ SNAPSHOT_EUREKA_CONFIG = {
     "gateway_url": "https://folio-etesting-snapshot-kong.ci.folio.org"
 }
 
+SNAPSHOT_2_EUREKA_CONFIG = {
+    "gateway_url": "https://folio-etesting-snapshot2-kong.ci.folio.org"
+}
+
 SNAPSHOT_EUREKA_ECS_CONFIG = {
     "gateway_url": "https://ecs-folio-etesting-snapshot-kong.ci.folio.org",
     "tenant_id": "consortium",
     "username": "consortium_admin",
     "password": "admin",
 }
+
+BUGFEST_CONFIG = {
+    "gateway_url": "https://kong-bugfest-sunflower.int.aws.folio.org",
+    "tenant_id": "fs09000000",
+    "username": "folio",
+    "password": "folio",
+}
+# pragma: warning enable=SC2068
 
 # Pytest markers
 pytestmark = pytest.mark.integration
@@ -61,6 +74,8 @@ SERVER_CONFIGS = [
     ("snapshot2", {**SNAPSHOT_CONFIG, **SNAPSHOT2_CONFIG}),
     ("eureka", {**SNAPSHOT_CONFIG, **SNAPSHOT_EUREKA_CONFIG}),
     ("eureka-ecs", SNAPSHOT_EUREKA_ECS_CONFIG),
+    ("snapshot-2-eureka", {**SNAPSHOT_CONFIG, **SNAPSHOT_2_EUREKA_CONFIG}),
+    ("bugfest", BUGFEST_CONFIG),
 ]
 
 
@@ -72,7 +87,7 @@ def server_config(request):
     Use environment variable INTEGRATION_SERVER to limit to a single config name,
     e.g. INTEGRATION_SERVER=snapshot pytest tests/integration_tests.py --run-integration
     """
-    desired = os.environ.get("INTEGRATION_SERVER")
+    desired = os.environ.get("INTEGRATION_SERVER") or request.config.getoption("--integration-server")
     if desired:
         # if the user requested a single server, only yield that config
         for name, cfg in SERVER_CONFIGS:
@@ -473,7 +488,7 @@ class TestPerformanceAndLimits:
         with folio_client:
             # Test with a larger limit to see how client handles it
             try:
-                users = folio_client.folio_get("/users", query_params={"limit": 1000})
+                users = folio_client.folio_get("/inventory", query_params={"limit": 1000})
                 assert "users" in users
                 assert len(users["users"]) <= 1000
             except Exception as e:
@@ -508,6 +523,17 @@ class TestPerformanceAndLimits:
             users = client.folio_get("/users", query_params={"limit": 5})
             assert "users" in users
 
+    @pytest.mark.slow(reason="May take time due to large dataset")
+    def test_get_large_dataset_id_offset(self):
+        """Test getting a large dataset with id-offset pagination."""
+        with FolioClient(**BUGFEST_CONFIG) as folio_client:
+            instance_count = 0
+            for instance in folio_client.folio_get_all("/instance-storage/instances", "instances", limit=1000):
+                instance_count += 1
+                if instance_count >= 1500000:
+                    break
+            
+            assert instance_count >= 1500000
 
 if __name__ == "__main__":
     # Run integration tests directly
