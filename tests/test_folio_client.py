@@ -561,7 +561,7 @@ def test_timeout_configuration():
     """Test various timeout configuration options"""
     
     # Test with float timeout
-    with folio_auth_patcher() as mock_auth:
+    with folio_auth_patcher():
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
@@ -588,7 +588,7 @@ def test_timeout_configuration_dict():
         "pool": 5.0
     }
     
-    with folio_auth_patcher() as mock_auth:
+    with folio_auth_patcher():
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
@@ -610,7 +610,7 @@ def test_timeout_configuration_httpx_object():
     
     timeout_obj = httpx.Timeout(connect=15.0, read=45.0, write=25.0, pool=8.0)
     
-    with folio_auth_patcher() as mock_auth:
+    with folio_auth_patcher():
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
@@ -630,7 +630,7 @@ def test_timeout_configuration_httpx_object():
 def test_timeout_configuration_none():
     """Test timeout configuration with None (should use global config)"""
     
-    with folio_auth_patcher() as mock_auth:
+    with folio_auth_patcher():
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
@@ -679,7 +679,7 @@ def test_http_client_creation_with_timeout():
         "pool": 12.0
     }
     
-    with folio_auth_patcher() as mock_auth:
+    with folio_auth_patcher():
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
@@ -708,7 +708,7 @@ def test_http_client_creation_with_timeout():
 def test_http_client_creation_with_no_timeout():
     """Test that HTTP clients are created with no timeout by default"""
     
-    with folio_auth_patcher() as mock_auth:
+    with folio_auth_patcher():
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
