@@ -55,7 +55,7 @@ class DummyAsyncClient(DummyClient):
 
 def make_params():
     return FolioConnectionParameters(
-        gateway_url="http://folio",
+        gateway_url="https//folio",
         tenant_id="alpha",
         username="u",
         password="p",
@@ -104,7 +104,7 @@ async def test_do_async_auth_and_cookie_header(monkeypatch):
     fa = FolioAuth(params)
 
     # simulate a request with existing non-folio cookie
-    req = httpx.Request("GET", "http://folio/test")
+    req = httpx.Request("GET", "https//folio/test")
     req.headers["Cookie"] = "other=1; folioAccessToken=old"
 
     # call _set_auth_cookies_on_request to ensure folio cookies override
@@ -149,7 +149,7 @@ def test_sync_auth_flow_refresh_success(monkeypatch):
 
     fa = FolioAuth(params)
 
-    req = httpx.Request("GET", "http://folio/resource")
+    req = httpx.Request("GET", "https//folio/resource")
     gen = fa.sync_auth_flow(req)
     # first yield returns the request
     yielded = next(gen)
@@ -176,7 +176,7 @@ def test_sync_auth_flow_refresh_still_unauthorized(monkeypatch):
 
     fa = FolioAuth(params)
 
-    req = httpx.Request("GET", "http://folio/resource")
+    req = httpx.Request("GET", "https//folio/resource")
     gen = fa.sync_auth_flow(req)
     next(gen)
     # initial 401
@@ -203,7 +203,7 @@ async def test_async_auth_flow_refresh_success(monkeypatch):
 
     fa = FolioAuth(params)
 
-    req = httpx.Request("GET", "http://folio/async")
+    req = httpx.Request("GET", "https//folio/async")
     agen = fa.async_auth_flow(req)
 
     # get first yielded request
@@ -232,7 +232,7 @@ def test_set_auth_cookies_clears_only_folio_cookies(monkeypatch):
 
     # simulate no token and request with only folio cookie
     fa._token = None
-    req = httpx.Request("GET", "http://folio/some")
+    req = httpx.Request("GET", "https//folio/some")
     req.headers["Cookie"] = "folioAccessToken=old"
     fa._set_auth_cookies_on_request(req)
     # header should be removed
@@ -268,7 +268,7 @@ def test_tenant_header_preserved_and_refresh_token_expiry(monkeypatch):
 
     fa = FolioAuth(params)
 
-    req = httpx.Request("GET", "http://folio/x")
+    req = httpx.Request("GET", "https//folio/x")
     # set tenant header already — should not be overwritten
     req.headers["x-okapi-tenant"] = "custom"
     gen = fa.sync_auth_flow(req)
@@ -314,7 +314,7 @@ def test_sync_auth_flow_pass_branch_no_refresh(monkeypatch):
     # replace instance _do_sync_auth to raise if called (should not be called)
     fa._do_sync_auth = lambda: (_ for _ in ()).throw(RuntimeError("should not refresh"))
 
-    req = httpx.Request("GET", "http://folio/resource")
+    req = httpx.Request("GET", "https//folio/resource")
     gen = fa.sync_auth_flow(req)
     next(gen)
     # initial 401 should hit the 'pass' branch and yield request again
@@ -348,7 +348,7 @@ async def test_async_auth_flow_pass_branch_no_refresh(monkeypatch):
 
     fa._do_async_auth = should_not_call
 
-    req = httpx.Request("GET", "http://folio/asyncpass")
+    req = httpx.Request("GET", "https//folio/asyncpass")
     agen = fa.async_auth_flow(req)
     first = await agen.__anext__()
     assert first is req
@@ -405,7 +405,7 @@ async def test_async_auth_flow_refresh_still_unauthorized(monkeypatch):
 
     fa = FolioAuth(params)
 
-    req = httpx.Request("GET", "http://folio/asyncfail")
+    req = httpx.Request("GET", "https//folio/asyncfail")
     agen = fa.async_auth_flow(req)
     # prime the async generator
     await agen.__anext__()
