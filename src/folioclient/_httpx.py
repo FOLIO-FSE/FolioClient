@@ -224,14 +224,7 @@ class FolioAuth(httpx.Auth):
         existing_cookie_header = request.headers.get("Cookie", "")
 
         # Parse existing cookies and filter out FOLIO auth cookies
-        existing_cookies = {}
-        if existing_cookie_header:
-            for cookie_pair in existing_cookie_header.split("; "):
-                if "=" in cookie_pair:
-                    name, value = cookie_pair.split("=", 1)
-                    # Skip FOLIO auth cookies - we'll override them
-                    if name not in ("folioAccessToken", "folioRefreshToken"):
-                        existing_cookies[name] = value
+        existing_cookies = self._parse_existing_cookies(existing_cookie_header)
 
         # Add our authentication cookies
         auth_cookies = {}
@@ -249,6 +242,18 @@ class FolioAuth(httpx.Auth):
         elif existing_cookie_header:
             # If we only had FOLIO cookies and removed them, clear the header
             request.headers.pop("Cookie", None)
+
+    @staticmethod
+    def _parse_existing_cookies(existing_cookie_header):
+        existing_cookies = {}
+        if existing_cookie_header:
+            for cookie_pair in existing_cookie_header.split("; "):
+                if "=" in cookie_pair:
+                    name, value = cookie_pair.split("=", 1)
+                    # Skip FOLIO auth cookies - we'll override them
+                    if name not in ("folioAccessToken", "folioRefreshToken"):
+                        existing_cookies[name] = value
+        return existing_cookies
 
     def _token_is_expiring(self) -> bool:
         """Returns true if token is within 60 seconds of expiration"""

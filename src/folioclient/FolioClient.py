@@ -228,9 +228,9 @@ class FolioClient:
         tenant_id (str): The tenant ID for the FOLIO instance.
         username (str): The username for authentication.
         password (str): The password for authentication.
-        ssl_verify (bool | ssl.SSLContext): Whether to verify SSL certificates, or a custom SSL context. Default is True.
-        okapi_url (keyword-only, str, optional): Deprecated. Use gateway_url instead.
-        timeout (float | dict | httpx.Timeout | None, optional): Timeout configuration for HTTP requests.
+        ssl_verify (bool | ssl.SSLContext), keyword-only: Whether to verify SSL certificates, or a custom SSL context. Default is True.
+        okapi_url (keyword-only, str, optional), keyword-only: Deprecated. Use gateway_url instead.
+        timeout (float | dict | httpx.Timeout | None, optional), keyword-only: Timeout configuration for HTTP requests.
     """  # noqa: E501
 
     def __init__(
