@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `okapi_headers` property - Use `folio_headers` instead
 - `okapi_token` property - Use `access_token` instead
 - `folio_token_expires` property - Use `access_token_expires` instead
+- `ssl_verify` parameter - Will be removed in future release
 
 ### Fixed
 - Authentication token management across sync/async operations
@@ -92,10 +93,10 @@ Multiple properties have been renamed for clarity and consistency:
 - **Migration**: Replace with appropriate `folio_get` or `folio_get_all` calls with specific queries
 
 ### Authentication Flow Changes
-- **Enhanced token lifecycle management**
+- **Enhanced token lifecycle management** Tokens now renew at one minute before expiry and this offset is no longer configurable via environment variable
 - **Cookie-based authentication** for better session handling [#73](https://github.com/FOLIO-FSE/FolioClient/issues/73)
 - **Impact**: Custom authentication code may need updates
-- **Migration**: While this change is largely transparent to the end-user of FolioClient, the one notable change is that you no longer need to pass the `headers=okapi_headers` to any `httpx.Client` or `httpx.AsyncClient` objects create using the `FolioClient.get_folio_http_client` and `FolioClient.get_folio_http_client_async` methods. They are instantiated with built-in authentication.
+- **Migration**: While this change is largely transparent to the end-user of FolioClient, the one notable change is that you no longer need to pass the `headers=okapi_headers` to any `httpx.Client` or `httpx.AsyncClient` objects created using the `FolioClient.get_folio_http_client` and `FolioClient.get_folio_http_client_async` methods. They are instantiated with built-in authentication.
 
 ### Exception Hierarchy
 - **New FOLIO-specific exception types**:
@@ -143,7 +144,7 @@ Multiple properties have been renamed for clarity and consistency:
 4. **Remove usage of `http_timeout` property** if used with non-httpx libraries
 5. **Replace removed methods**:
    - `get_random_objects` → Use `folio_get` or `folio_get_all` with specific queries
-   - `folio_get_all_by_id_offset` has been consolidated with `folio_get_all` and is invoked if `query=` contains `sortBy id`
+   - `folio_get_all_by_id_offset` has been consolidated with `folio_get_all` and behavior is invoked whenever `query=` contains `sortBy id`
 6. **Update exception handling** to catch specific FOLIO exception types
 7. **Test thoroughly** in your environment before deploying
 
