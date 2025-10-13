@@ -29,10 +29,10 @@ class DummyResponse:
 
 
 class DummyClient:
-    def __init__(self, response):
+    def __init__(self, response=None, *args, **kwargs):
         self._response = response
 
-    def post(self, url, json=None, headers=None):
+    def post(self, *args, **kwargs):
         return self._response
 
     def __enter__(self):
@@ -43,7 +43,10 @@ class DummyClient:
 
 
 class DummyAsyncClient(DummyClient):
-    async def post(self, url, json=None, headers=None):
+    def __init__(self, response=None, *args, **kwargs):
+        super().__init__(response)
+
+    async def post(self, *args, **kwargs):
         return self._response
 
     async def __aenter__(self):
@@ -72,10 +75,10 @@ def test_do_sync_auth_and_token_properties(monkeypatch):
     cookies = {"folioAccessToken": "token123", "folioRefreshToken": "rtoken"}
     resp = DummyResponse(cookies=cookies, json_data={"accessTokenExpiration": expires})
 
-    def fake_client(*args, **kwargs):
-        return DummyClient(resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
+    def dummy_client_factory(*args, **kwargs):
+        return DummyClient(resp)
+    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
     fa = FolioAuth(params)
 
@@ -92,14 +95,13 @@ async def test_do_async_auth_and_cookie_header(monkeypatch):
     cookies = {"folioAccessToken": "async-token", "folioRefreshToken": "async-rtoken"}
     resp = DummyResponse(cookies=cookies, json_data={"accessTokenExpiration": expires})
 
-    def fake_async_client(*args, **kwargs):
-        return DummyAsyncClient(resp)
 
-    def fake_client(*args, **kwargs):
+    def dummy_client_factory(*args, **kwargs):
         return DummyClient(resp)
-
-    monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", fake_async_client)
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
+    def dummy_async_client_factory(*args, **kwargs):
+        return DummyAsyncClient(resp)
+    monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", dummy_async_client_factory)
+    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
     fa = FolioAuth(params)
 
@@ -119,10 +121,10 @@ def test_token_is_expiring_and_reset_tenant(monkeypatch):
     cookies = {"folioAccessToken": "t", "folioRefreshToken": "r"}
     resp = DummyResponse(cookies=cookies, json_data={})
 
-    def fake_client(*args, **kwargs):
-        return DummyClient(resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
+    def dummy_client_factory(*args, **kwargs):
+        return DummyClient(resp)
+    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
     fa = FolioAuth(params)
 
@@ -142,10 +144,10 @@ def test_sync_auth_flow_refresh_success(monkeypatch):
     auth_cookies = {"folioAccessToken": "auth-t", "folioRefreshToken": "auth-r"}
     auth_resp = DummyResponse(cookies=auth_cookies, json_data={})
 
-    def fake_client(*args, **kwargs):
-        return DummyClient(auth_resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
+    def dummy_client_factory(*args, **kwargs):
+        return DummyClient(auth_resp)
+    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
     fa = FolioAuth(params)
 
@@ -169,10 +171,10 @@ def test_sync_auth_flow_refresh_still_unauthorized(monkeypatch):
     auth_cookies = {"folioAccessToken": "auth-t", "folioRefreshToken": "auth-r"}
     auth_resp = DummyResponse(cookies=auth_cookies, json_data={})
 
-    def fake_client(*args, **kwargs):
-        return DummyClient(auth_resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
+    def dummy_client_factory(*args, **kwargs):
+        return DummyClient(auth_resp)
+    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
     fa = FolioAuth(params)
 
@@ -192,14 +194,13 @@ async def test_async_auth_flow_refresh_success(monkeypatch):
     auth_cookies = {"folioAccessToken": "aasync", "folioRefreshToken": "raasync"}
     auth_resp = DummyResponse(cookies=auth_cookies, json_data={})
 
-    def fake_client(*args, **kwargs):
+
+    def dummy_client_factory(*args, **kwargs):
         return DummyClient(auth_resp)
-
-    def fake_async_client(*args, **kwargs):
+    def dummy_async_client_factory(*args, **kwargs):
         return DummyAsyncClient(auth_resp)
-
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
-    monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", fake_async_client)
+    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
+    monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", dummy_async_client_factory)
 
     fa = FolioAuth(params)
 
