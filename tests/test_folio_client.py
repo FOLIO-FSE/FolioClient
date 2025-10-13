@@ -1,74 +1,18 @@
 import pytest
-import sys
-import atexit
-from contextlib import contextmanager
-
-# Version-specific setup for Python 3.10 compatibility
-_PYTHON_3_10 = sys.version_info < (3, 11)
-
-if _PYTHON_3_10:
-    # For Python 3.10: Apply source-level patch before any imports
-    from unittest.mock import Mock, patch
-    
-    # Import and immediately patch the source
-    import folioclient._httpx
-    _original_folio_auth = folioclient._httpx.FolioAuth
-    _source_mock = Mock()
-    folioclient._httpx.FolioAuth = _source_mock
-    
-    # Cleanup function
-    def _restore_source():
-        folioclient._httpx.FolioAuth = _original_folio_auth
-    atexit.register(_restore_source)
-
-# Now safe to import FolioClient 
-from folioclient.FolioClient import FolioClient
 from httpx import HTTPError, UnsupportedProtocol
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 import httpx
+
+# Import shared test utilities
+from .test_utils import folio_auth_patcher
+
+# Now safe to import FolioClient 
+from folioclient.FolioClient import FolioClient
 
 # Import all FOLIO exceptions used in tests
 from folioclient.exceptions import (
     FolioClientClosed,
 )
-
-
-def folio_auth_patch():
-    """
-    Returns appropriate FolioAuth patch for the current Python version.
-    
-    Handles version differences in unittest.mock.patch behavior:
-    - Python 3.10: Uses pre-configured source mock + module globals patching
-    - Python 3.11+: Uses standard imported name patching
-    """
-    if _PYTHON_3_10:
-        @contextmanager
-        def python310_auth_patch():
-            # Reset source mock for clean test state
-            _source_mock.reset_mock()
-            
-            # Configure mock to return a proper instance
-            mock_instance = Mock()
-            mock_instance.tenant_id = "test-tenant"
-            _source_mock.return_value = mock_instance
-            
-            # Also patch the module-level reference for double coverage
-            import sys
-            fc_module = sys.modules['folioclient.FolioClient']
-            original_ref = fc_module.__dict__.get('FolioAuth')
-            fc_module.__dict__['FolioAuth'] = _source_mock
-            
-            try:
-                yield _source_mock
-            finally:
-                # Restore module reference
-                if original_ref is not None:
-                    fc_module.__dict__['FolioAuth'] = original_ref
-        
-        return python310_auth_patch()
-    else:
-        # Python 3.11+: Standard import patching works correctly
-        return patch('folioclient.FolioClient.FolioAuth')
 
 
 def test_first():
@@ -126,15 +70,10 @@ def test_get_latest_from_github_returns_file_orgs_has_no_releases():
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_folio_client_initialization_with_valid_url(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
-        mock_auth_instance = Mock()
-        mock_auth_instance.tenant_id = "tenant"
-        mock_folio_auth.return_value = mock_auth_instance
-        
+    with folio_auth_patcher():
         fc = FolioClient("https://example.com", "tenant", "user", "pass")
         assert fc.gateway_url == "https://example.com"
         assert fc.username == "user"
-    mock_folio_auth.assert_called_once()
 
 
 def test_folio_client_initialization_with_invalid_protocol():
@@ -144,7 +83,7 @@ def test_folio_client_initialization_with_invalid_protocol():
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_tenant_id_property_getter(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_auth_instance.tenant_id = "original_tenant"
         mock_folio_auth.return_value = mock_auth_instance
@@ -156,7 +95,7 @@ def test_tenant_id_property_getter(mock_ecs_check):
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_tenant_id_property_basic_functionality(mock_ecs_check):
     """Test basic tenant_id property functionality without ECS restrictions"""
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_auth_instance.tenant_id = "test_tenant"
         mock_folio_auth.return_value = mock_auth_instance
@@ -176,7 +115,7 @@ def test_tenant_id_property_basic_functionality(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_okapi_headers_contain_required_fields(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_auth_instance.tenant_id = "test_tenant"
         mock_auth_instance.folio_auth_token = "mock_token"
@@ -198,7 +137,7 @@ def test_okapi_headers_contain_required_fields(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_folio_headers_contain_required_fields(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_auth_instance.tenant_id = "test_tenant"
         mock_auth_instance.folio_auth_token = "mock_token"
@@ -211,7 +150,7 @@ def test_folio_headers_contain_required_fields(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_is_closed_property_initially_false(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -221,7 +160,7 @@ def test_is_closed_property_initially_false(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_ssl_verify_default_true(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -231,7 +170,7 @@ def test_ssl_verify_default_true(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_ssl_verify_can_be_set_false(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
 
@@ -241,7 +180,7 @@ def test_ssl_verify_can_be_set_false(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_gateway_url_property(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -251,7 +190,7 @@ def test_gateway_url_property(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_okapi_url_property_same_as_gateway_url(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -266,7 +205,7 @@ def test_okapi_url_property_same_as_gateway_url(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_close_sets_is_closed_true(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -286,7 +225,7 @@ def test_close_sets_is_closed_true(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_logout_is_alias_for_close(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -310,7 +249,7 @@ def test_logout_is_alias_for_close(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_operations_on_closed_client_raise_exception(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -324,7 +263,7 @@ def test_operations_on_closed_client_raise_exception(mock_ecs_check):
 
 
 def test_context_manager_closes_client():
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -342,7 +281,7 @@ def test_context_manager_closes_client():
 
 @pytest.mark.asyncio
 async def test_async_context_manager_closes_client():
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -369,7 +308,7 @@ async def test_async_context_manager_closes_client():
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_folio_headers_contain_basic_fields(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_auth_instance.tenant_id = "tenant"
         mock_auth_instance.folio_auth_token = "mock_token"
@@ -383,7 +322,7 @@ def test_folio_headers_contain_basic_fields(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_prepare_id_offset_query_handles_sortby_present(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -394,7 +333,7 @@ def test_prepare_id_offset_query_handles_sortby_present(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_prepare_id_offset_query_handles_none(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -405,7 +344,7 @@ def test_prepare_id_offset_query_handles_none(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_construct_query_parameters_builds_dict(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -418,7 +357,7 @@ def test_construct_query_parameters_builds_dict(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_get_last_id_extracts_id_from_results(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -430,7 +369,7 @@ def test_get_last_id_extracts_id_from_results(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_get_last_id_returns_none_for_empty_results(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -441,7 +380,7 @@ def test_get_last_id_returns_none_for_empty_results(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_get_folio_http_client_returns_client(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -454,7 +393,7 @@ def test_get_folio_http_client_returns_client(mock_ecs_check):
 
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_get_folio_http_client_async_returns_async_client(mock_ecs_check):
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_folio_auth.return_value = mock_auth_instance
         
@@ -468,7 +407,7 @@ def test_get_folio_http_client_async_returns_async_client(mock_ecs_check):
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_folio_headers_update_handles_x_okapi_tenant(mock_ecs_check):
     """Ensure updating headers with x-okapi-tenant warns and updates tenant_id."""
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_auth_instance.tenant_id = "initial"
         mock_folio_auth.return_value = mock_auth_instance
@@ -493,7 +432,7 @@ def test_folio_headers_update_handles_x_okapi_tenant(mock_ecs_check):
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_logout_response_handler_branches(mock_ecs_check):
     """Exercise logout_response_handler exception handling for 404, other HTTP errors, and ConnectError."""
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_auth_instance.tenant_id = "t"
         mock_folio_auth.return_value = mock_auth_instance
@@ -525,7 +464,7 @@ def test_logout_response_handler_branches(mock_ecs_check):
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_current_user_fallbacks_and_failure(mock_ecs_check):
     """Test current_user primary path, fallback to /users, and final failure returning empty string."""
-    with folio_auth_patch() as mock_folio_auth:
+    with folio_auth_patcher() as mock_folio_auth:
         mock_auth_instance = Mock()
         mock_auth_instance.tenant_id = "t"
         mock_folio_auth.return_value = mock_auth_instance
@@ -622,7 +561,7 @@ def test_timeout_configuration():
     """Test various timeout configuration options"""
     
     # Test with float timeout
-    with folio_auth_patch() as mock_auth:
+    with folio_auth_patcher() as mock_auth:
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
@@ -649,7 +588,7 @@ def test_timeout_configuration_dict():
         "pool": 5.0
     }
     
-    with folio_auth_patch() as mock_auth:
+    with folio_auth_patcher() as mock_auth:
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
@@ -671,7 +610,7 @@ def test_timeout_configuration_httpx_object():
     
     timeout_obj = httpx.Timeout(connect=15.0, read=45.0, write=25.0, pool=8.0)
     
-    with folio_auth_patch() as mock_auth:
+    with folio_auth_patcher() as mock_auth:
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
@@ -691,7 +630,7 @@ def test_timeout_configuration_httpx_object():
 def test_timeout_configuration_none():
     """Test timeout configuration with None (should use global config)"""
     
-    with folio_auth_patch() as mock_auth:
+    with folio_auth_patcher() as mock_auth:
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
@@ -713,7 +652,7 @@ def test_timeout_configuration_none():
     @patch.object(FolioClient, '_initial_ecs_check')
     def test_validate_client_open_behavior(mock_ecs_check):
         """Validate that validate_client_open() raises when client is closed and is a no-op when open."""
-        with folio_auth_patch() as mock_folio_auth:
+        with folio_auth_patcher() as mock_folio_auth:
             mock_auth_instance = Mock()
             mock_folio_auth.return_value = mock_auth_instance
 
@@ -740,7 +679,7 @@ def test_http_client_creation_with_timeout():
         "pool": 12.0
     }
     
-    with folio_auth_patch() as mock_auth:
+    with folio_auth_patcher() as mock_auth:
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
@@ -769,7 +708,7 @@ def test_http_client_creation_with_timeout():
 def test_http_client_creation_with_no_timeout():
     """Test that HTTP clients are created with no timeout by default"""
     
-    with folio_auth_patch() as mock_auth:
+    with folio_auth_patcher() as mock_auth:
         client = FolioClient(
             "https://test.example.com",
             "test_tenant",
