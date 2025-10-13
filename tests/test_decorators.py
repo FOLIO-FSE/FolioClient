@@ -1,11 +1,11 @@
 """Tests for the decorators module."""
 
+import inspect
 import time
 from types import SimpleNamespace
 import types
 import httpx
 import pytest
-import asyncio
 from unittest.mock import Mock, AsyncMock, patch
 import httpx
 
@@ -563,10 +563,10 @@ class TestHandleRemoteProtocolErrorDecorator:
             return "async"
         
         # Sync function should not be a coroutine function
-        assert not asyncio.iscoroutinefunction(sync_func)
+        assert not inspect.iscoroutinefunction(sync_func)
         
         # Async function should be a coroutine function
-        assert asyncio.iscoroutinefunction(async_func)
+        assert inspect.iscoroutinefunction(async_func)
 
     def test_method_arguments_passed_through_sync(self):
         """Test that method arguments are correctly passed through for sync methods"""
