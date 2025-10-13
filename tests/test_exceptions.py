@@ -1,6 +1,6 @@
 """Tests for the exceptions module."""
 
-import asyncio
+import inspect
 import pytest
 from unittest.mock import Mock
 
@@ -388,7 +388,7 @@ class TestFolioErrorsDecorator:
         
         assert async_test_function.__name__ == "async_test_function"
         assert async_test_function.__doc__ == "Async test docstring."
-        assert asyncio.iscoroutinefunction(async_test_function)
+        assert inspect.iscoroutinefunction(async_test_function)
 
 
 class TestInheritance:
