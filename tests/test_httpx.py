@@ -1,8 +1,14 @@
+
 import pytest
 import httpx
 from datetime import datetime, timedelta, timezone
 
+# Import shared test utilities
+from .test_utils import httpx_client_patcher
+
 from folioclient._httpx import FolioConnectionParameters, FolioAuth
+
+# Dummy classes remain the same for backward compatibility
 
 
 class DummyCookies(dict):
@@ -73,13 +79,10 @@ def make_params():
 
 def test_do_sync_auth_and_token_properties(monkeypatch):
     params = make_params()
-    # Response contains folioAccessToken and expiration
     now = datetime.now(tz=timezone.utc)
     expires = (now + timedelta(minutes=5)).isoformat()
     cookies = {"folioAccessToken": "token123", "folioRefreshToken": "rtoken"}
     resp = DummyResponse(cookies=cookies, json_data={"accessTokenExpiration": expires})
-
-
 
     class PatchedDummyClient(DummyClient):
         def post(self, url, *args, **kwargs):
@@ -89,13 +92,11 @@ def test_do_sync_auth_and_token_properties(monkeypatch):
 
     def dummy_client_factory(*args, **kwargs):
         return PatchedDummyClient()
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
-    fa = FolioAuth(params)
-
-    # folio_auth_token property should return token123
-    assert fa.folio_auth_token == "token123"
-    assert fa.folio_refresh_token == "rtoken"
+    with httpx_client_patcher(dummy_client_factory):
+        fa = FolioAuth(params)
+        assert fa.folio_auth_token == "token123"
+        assert fa.folio_refresh_token == "rtoken"
 
 
 @pytest.mark.asyncio
@@ -105,8 +106,6 @@ async def test_do_async_auth_and_cookie_header(monkeypatch):
     expires = (now + timedelta(minutes=5)).isoformat()
     cookies = {"folioAccessToken": "async-token", "folioRefreshToken": "async-rtoken"}
     resp = DummyResponse(cookies=cookies, json_data={"accessTokenExpiration": expires})
-
-
 
     class PatchedDummyClient(DummyClient):
         def post(self, url, *args, **kwargs):
@@ -124,19 +123,14 @@ async def test_do_async_auth_and_cookie_header(monkeypatch):
         return PatchedDummyClient()
     def dummy_async_client_factory(*args, **kwargs):
         return PatchedDummyAsyncClient()
-    monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", dummy_async_client_factory)
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
-    fa = FolioAuth(params)
-
-    # simulate a request with existing non-folio cookie
-    req = httpx.Request("GET", "https//folio/test")
-    req.headers["Cookie"] = "other=1; folioAccessToken=old"
-
-    # call _set_auth_cookies_on_request to ensure folio cookies override
-    fa._set_auth_cookies_on_request(req)
-    assert "async-token" in req.headers["Cookie"]
-    assert "other=1" in req.headers["Cookie"]
+    with httpx_client_patcher(dummy_client_factory, dummy_async_client_factory):
+        fa = FolioAuth(params)
+        req = httpx.Request("GET", "https//folio/test")
+        req.headers["Cookie"] = "other=1; folioAccessToken=old"
+        fa._set_auth_cookies_on_request(req)
+        assert "async-token" in req.headers["Cookie"]
+        assert "other=1" in req.headers["Cookie"]
 
 
 def test_token_is_expiring_and_reset_tenant(monkeypatch):
@@ -155,18 +149,14 @@ def test_token_is_expiring_and_reset_tenant(monkeypatch):
 
     def dummy_client_factory(*args, **kwargs):
         return PatchedDummyClient()
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
-    fa = FolioAuth(params)
-
-    # force token to be old
-    fa._token = FolioAuth._Token(auth_token="x", refresh_token=None, expires_at=datetime.now(tz=timezone.utc)-timedelta(minutes=1), refresh_token_expires_at=None, cookies=None)
-    assert fa._token_is_expiring()
-
-    # reset tenant id should set it back to params.tenant_id
-    fa.tenant_id = "other"
-    fa.reset_tenant_id()
-    assert fa.tenant_id == "alpha"
+    with httpx_client_patcher(dummy_client_factory):
+        fa = FolioAuth(params)
+        fa._token = FolioAuth._Token(auth_token="x", refresh_token=None, expires_at=datetime.now(tz=timezone.utc)-timedelta(minutes=1), refresh_token_expires_at=None, cookies=None)
+        assert fa._token_is_expiring()
+        fa.tenant_id = "other"
+        fa.reset_tenant_id()
+        assert fa.tenant_id == "alpha"
 
 
 def test_sync_auth_flow_refresh_success(monkeypatch):
@@ -185,23 +175,17 @@ def test_sync_auth_flow_refresh_success(monkeypatch):
 
     def dummy_client_factory(*args, **kwargs):
         return PatchedDummyClient()
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
-    fa = FolioAuth(params)
-
-    req = httpx.Request("GET", "https//folio/resource")
-    gen = fa.sync_auth_flow(req)
-    # first yield returns the request
-    yielded = next(gen)
-    assert yielded is req
-
-    # send a 401 response -> should trigger refresh and yield request again
-    yielded_after = gen.send(DummyResponse(status_code=401))
-    assert yielded_after is req
-
-    # send a successful response to finish
-    with pytest.raises(StopIteration):
-        gen.send(DummyResponse(status_code=200))
+    with httpx_client_patcher(dummy_client_factory):
+        fa = FolioAuth(params)
+        req = httpx.Request("GET", "https//folio/resource")
+        gen = fa.sync_auth_flow(req)
+        yielded = next(gen)
+        assert yielded is req
+        yielded_after = gen.send(DummyResponse(status_code=401))
+        assert yielded_after is req
+        with pytest.raises(StopIteration):
+            gen.send(DummyResponse(status_code=200))
 
 
 def test_sync_auth_flow_refresh_still_unauthorized(monkeypatch):
@@ -219,18 +203,15 @@ def test_sync_auth_flow_refresh_still_unauthorized(monkeypatch):
 
     def dummy_client_factory(*args, **kwargs):
         return PatchedDummyClient()
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
 
-    fa = FolioAuth(params)
-
-    req = httpx.Request("GET", "https//folio/resource")
-    gen = fa.sync_auth_flow(req)
-    next(gen)
-    # initial 401
-    gen.send(DummyResponse(status_code=401))
-    # second 401 after refresh should raise HTTPStatusError
-    with pytest.raises(httpx.HTTPStatusError):
+    with httpx_client_patcher(dummy_client_factory):
+        fa = FolioAuth(params)
+        req = httpx.Request("GET", "https//folio/resource")
+        gen = fa.sync_auth_flow(req)
+        next(gen)
         gen.send(DummyResponse(status_code=401))
+        with pytest.raises(httpx.HTTPStatusError):
+            gen.send(DummyResponse(status_code=401))
 
 
 @pytest.mark.asyncio
@@ -257,25 +238,17 @@ async def test_async_auth_flow_refresh_success(monkeypatch):
         return PatchedDummyClient()
     def dummy_async_client_factory(*args, **kwargs):
         return PatchedDummyAsyncClient()
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", dummy_client_factory)
-    monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", dummy_async_client_factory)
 
-    fa = FolioAuth(params)
-
-    req = httpx.Request("GET", "https//folio/async")
-    agen = fa.async_auth_flow(req)
-
-    # get first yielded request
-    first = await agen.__anext__()
-    assert first is req
-
-    # send a 401 response -> should cause refresh and yield again
-    second = await agen.asend(DummyResponse(status_code=401))
-    assert second is req
-
-    # send final 200 to complete
-    with pytest.raises(StopAsyncIteration):
-        await agen.asend(DummyResponse(status_code=200))
+    with httpx_client_patcher(dummy_client_factory, dummy_async_client_factory):
+        fa = FolioAuth(params)
+        req = httpx.Request("GET", "https//folio/async")
+        agen = fa.async_auth_flow(req)
+        first = await agen.__anext__()
+        assert first is req
+        second = await agen.asend(DummyResponse(status_code=401))
+        assert second is req
+        with pytest.raises(StopAsyncIteration):
+            await agen.asend(DummyResponse(status_code=200))
 
 
 def test_set_auth_cookies_clears_only_folio_cookies(monkeypatch):
@@ -286,16 +259,13 @@ def test_set_auth_cookies_clears_only_folio_cookies(monkeypatch):
     def fake_client(*args, **kwargs):
         return DummyClient(auth_resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
-    fa = FolioAuth(params)
-
-    # simulate no token and request with only folio cookie
-    fa._token = None
-    req = httpx.Request("GET", "https//folio/some")
-    req.headers["Cookie"] = "folioAccessToken=old"
-    fa._set_auth_cookies_on_request(req)
-    # header should be removed
-    assert "Cookie" not in req.headers
+    with httpx_client_patcher(fake_client):
+        fa = FolioAuth(params)
+        fa._token = None
+        req = httpx.Request("GET", "https//folio/some")
+        req.headers["Cookie"] = "folioAccessToken=old"
+        fa._set_auth_cookies_on_request(req)
+        assert "Cookie" not in req.headers
 
 
 def test_do_sync_auth_raises_when_no_token(monkeypatch):
@@ -306,10 +276,9 @@ def test_do_sync_auth_raises_when_no_token(monkeypatch):
     def fake_client(*args, **kwargs):
         return DummyClient(resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
-
-    with pytest.raises(ValueError):
-        FolioAuth(params)
+    with httpx_client_patcher(fake_client):
+        with pytest.raises(ValueError):
+            FolioAuth(params)
 
 
 def test_tenant_header_preserved_and_refresh_token_expiry(monkeypatch):
@@ -323,17 +292,14 @@ def test_tenant_header_preserved_and_refresh_token_expiry(monkeypatch):
     def fake_client(*args, **kwargs):
         return DummyClient(resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
-
-    fa = FolioAuth(params)
-
-    req = httpx.Request("GET", "https//folio/x")
-    # set tenant header already — should not be overwritten
-    req.headers["x-okapi-tenant"] = "custom"
-    gen = fa.sync_auth_flow(req)
-    first = next(gen)
-    assert first is req
-    assert req.headers["x-okapi-tenant"] == "custom"
+    with httpx_client_patcher(fake_client):
+        fa = FolioAuth(params)
+        req = httpx.Request("GET", "https//folio/x")
+        req.headers["x-okapi-tenant"] = "custom"
+        gen = fa.sync_auth_flow(req)
+        first = next(gen)
+        assert first is req
+        assert req.headers["x-okapi-tenant"] == "custom"
 
 
 def test_folio_auth_token_refreshes_when_expired(monkeypatch):
@@ -346,15 +312,10 @@ def test_folio_auth_token_refreshes_when_expired(monkeypatch):
     def fake_client(*args, **kwargs):
         return DummyClient(resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
-
-    fa = FolioAuth(params)
-
-    # set token to expired
-    fa._token = FolioAuth._Token(auth_token="expired", refresh_token=None, expires_at=now - timedelta(seconds=10), refresh_token_expires_at=None, cookies=None)
-
-    # next access to folio_auth_token should trigger _do_sync_auth and return resp cookie value
-    assert fa.folio_auth_token == "old"
+    with httpx_client_patcher(fake_client):
+        fa = FolioAuth(params)
+        fa._token = FolioAuth._Token(auth_token="expired", refresh_token=None, expires_at=now - timedelta(seconds=10), refresh_token_expires_at=None, cookies=None)
+        assert fa.folio_auth_token == "old"
 
 
 def test_sync_auth_flow_pass_branch_no_refresh(monkeypatch):
@@ -366,22 +327,16 @@ def test_sync_auth_flow_pass_branch_no_refresh(monkeypatch):
     def fake_client(*args, **kwargs):
         return DummyClient(resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
-
-    fa = FolioAuth(params)
-
-    # replace instance _do_sync_auth to raise if called (should not be called)
-    fa._do_sync_auth = lambda: (_ for _ in ()).throw(RuntimeError("should not refresh"))
-
-    req = httpx.Request("GET", "https//folio/resource")
-    gen = fa.sync_auth_flow(req)
-    next(gen)
-    # initial 401 should hit the 'pass' branch and yield request again
-    yielded = gen.send(DummyResponse(status_code=401))
-    assert yielded is req
-    # complete normally
-    with pytest.raises(StopIteration):
-        gen.send(DummyResponse(status_code=200))
+    with httpx_client_patcher(fake_client):
+        fa = FolioAuth(params)
+        fa._do_sync_auth = lambda: (_ for _ in ()).throw(RuntimeError("should not refresh"))
+        req = httpx.Request("GET", "https//folio/resource")
+        gen = fa.sync_auth_flow(req)
+        next(gen)
+        yielded = gen.send(DummyResponse(status_code=401))
+        assert yielded is req
+        with pytest.raises(StopIteration):
+            gen.send(DummyResponse(status_code=200))
 
 
 @pytest.mark.asyncio
@@ -392,29 +347,22 @@ async def test_async_auth_flow_pass_branch_no_refresh(monkeypatch):
 
     def fake_client(*args, **kwargs):
         return DummyClient(resp)
-
     def fake_async_client(*args, **kwargs):
         return DummyAsyncClient(resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
-    monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", fake_async_client)
-
-    fa = FolioAuth(params)
-
-    # replace instance _do_async_auth to raise if called
-    async def should_not_call():
-        raise RuntimeError("should not be called")
-
-    fa._do_async_auth = should_not_call
-
-    req = httpx.Request("GET", "https//folio/asyncpass")
-    agen = fa.async_auth_flow(req)
-    first = await agen.__anext__()
-    assert first is req
-    second = await agen.asend(DummyResponse(status_code=401))
-    assert second is req
-    with pytest.raises(StopAsyncIteration):
-        await agen.asend(DummyResponse(status_code=200))
+    with httpx_client_patcher(fake_client, fake_async_client):
+        fa = FolioAuth(params)
+        async def should_not_call():
+            raise RuntimeError("should not be called")
+        fa._do_async_auth = should_not_call
+        req = httpx.Request("GET", "https//folio/asyncpass")
+        agen = fa.async_auth_flow(req)
+        first = await agen.__anext__()
+        assert first is req
+        second = await agen.asend(DummyResponse(status_code=401))
+        assert second is req
+        with pytest.raises(StopAsyncIteration):
+            await agen.asend(DummyResponse(status_code=200))
 
 
 @pytest.mark.asyncio
@@ -422,29 +370,22 @@ async def test_do_async_auth_raises_and_parses_expirations(monkeypatch):
     params = make_params()
     # make __init__ succeed
     init_resp = DummyResponse(cookies={"folioAccessToken": "ok", "folioRefreshToken": "rok"}, json_data={})
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", lambda *a, **k: DummyClient(init_resp))
-
-    fa = FolioAuth(params)
-
-    # async client returns no token -> should raise
-    def fake_async_client_no_token(*args, **kwargs):
-        return DummyAsyncClient(DummyResponse(cookies={}, json_data={}))
-
-    monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", fake_async_client_no_token)
-    with pytest.raises(ValueError):
-        await fa._do_async_auth()
-
-    # now test parsing of expirations
-    now = datetime.now(tz=timezone.utc)
-    ad = (now + timedelta(minutes=10)).isoformat()
-    rd = (now + timedelta(hours=1)).isoformat()
-    def fake_async_client_with_exp(*args, **kwargs):
-        return DummyAsyncClient(DummyResponse(cookies={"folioAccessToken": "tok"}, json_data={"accessTokenExpiration": ad, "refreshTokenExpiration": rd}))
-
-    monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", fake_async_client_with_exp)
-    token = await fa._do_async_auth()
-    assert token.expires_at is not None
-    assert token.refresh_token_expires_at is not None
+    with httpx_client_patcher(lambda *a, **k: DummyClient(init_resp)):
+        fa = FolioAuth(params)
+        def fake_async_client_no_token(*args, **kwargs):
+            return DummyAsyncClient(DummyResponse(cookies={}, json_data={}))
+        with httpx_client_patcher(lambda *a, **k: DummyClient(init_resp), fake_async_client_no_token):
+            with pytest.raises(ValueError):
+                await fa._do_async_auth()
+        now = datetime.now(tz=timezone.utc)
+        ad = (now + timedelta(minutes=10)).isoformat()
+        rd = (now + timedelta(hours=1)).isoformat()
+        def fake_async_client_with_exp(*args, **kwargs):
+            return DummyAsyncClient(DummyResponse(cookies={"folioAccessToken": "tok"}, json_data={"accessTokenExpiration": ad, "refreshTokenExpiration": rd}))
+        with httpx_client_patcher(lambda *a, **k: DummyClient(init_resp), fake_async_client_with_exp):
+            token = await fa._do_async_auth()
+            assert token.expires_at is not None
+            assert token.refresh_token_expires_at is not None
 
 
 @pytest.mark.asyncio
@@ -459,20 +400,14 @@ async def test_async_auth_flow_refresh_still_unauthorized(monkeypatch):
     def fake_async_client(*args, **kwargs):
         return DummyAsyncClient(auth_resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
-    monkeypatch.setattr("folioclient._httpx.httpx.AsyncClient", fake_async_client)
-
-    fa = FolioAuth(params)
-
-    req = httpx.Request("GET", "https//folio/asyncfail")
-    agen = fa.async_auth_flow(req)
-    # prime the async generator
-    await agen.__anext__()
-    # first 401 triggers refresh
-    await agen.asend(DummyResponse(status_code=401))
-    # second 401 should raise HTTPStatusError
-    with pytest.raises(httpx.HTTPStatusError):
+    with httpx_client_patcher(fake_client, fake_async_client):
+        fa = FolioAuth(params)
+        req = httpx.Request("GET", "https//folio/asyncfail")
+        agen = fa.async_auth_flow(req)
+        await agen.__anext__()
         await agen.asend(DummyResponse(status_code=401))
+        with pytest.raises(httpx.HTTPStatusError):
+            await agen.asend(DummyResponse(status_code=401))
 
 
 def test_folio_refresh_token_refreshes_when_expired(monkeypatch):
@@ -484,13 +419,8 @@ def test_folio_refresh_token_refreshes_when_expired(monkeypatch):
     def fake_client(*args, **kwargs):
         return DummyClient(resp)
 
-    monkeypatch.setattr("folioclient._httpx.httpx.Client", fake_client)
-
-    fa = FolioAuth(params)
-
-    # set token to expired
-    now = datetime.now(tz=timezone.utc)
-    fa._token = FolioAuth._Token(auth_token="expired", refresh_token="old", expires_at=now - timedelta(seconds=10), refresh_token_expires_at=None, cookies=None)
-
-    # accessing folio_refresh_token should refresh and return newr
-    assert fa.folio_refresh_token == "newr"
+    with httpx_client_patcher(fake_client):
+        fa = FolioAuth(params)
+        now = datetime.now(tz=timezone.utc)
+        fa._token = FolioAuth._Token(auth_token="expired", refresh_token="old", expires_at=now - timedelta(seconds=10), refresh_token_expires_at=None, cookies=None)
+        assert fa.folio_refresh_token == "newr"
