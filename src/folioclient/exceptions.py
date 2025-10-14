@@ -459,17 +459,17 @@ def folio_errors(func: Callable[P, Any]) -> Callable[P, Any]:
     Works with both synchronous and asynchronous functions.
 
     Usage:
-        @folio_errors
-        def get_user(self, user_id: str):
-            response = self._client.get(f"/users/{user_id}")
-            response.raise_for_status()
-            return response.json()
+        >>> @folio_errors
+        ... def get_user(self, user_id: str):
+        ...     response = self._client.get(f"/users/{user_id}")
+        ...     response.raise_for_status()
+        ...     return response.json()
 
-        @folio_errors
-        async def get_user_async(self, user_id: str):
-            response = await self._async_client.get(f"/users/{user_id}")
-            response.raise_for_status()
-            return response.json()
+        >>> @folio_errors
+        ... async def get_user_async(self, user_id: str):
+        ...     response = await self._async_client.get(f"/users/{user_id}")
+        ...     response.raise_for_status()
+        ...     return response.json()
     """
     if inspect.iscoroutinefunction(func):
 
