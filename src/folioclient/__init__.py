@@ -47,6 +47,7 @@ __all__ = [
     "FolioConnectionParameters",
     # Base exceptions
     "FolioError",
+    # Client closed
     "FolioClientClosed",
     # Connection errors
     "FolioConnectionError",
