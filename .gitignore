@@ -121,3 +121,6 @@ Thumbs.db
 
 # Github Stuff
 .github/*.md
+
+# Profiling
+*.prof
