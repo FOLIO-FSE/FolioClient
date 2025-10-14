@@ -59,8 +59,8 @@ SNAPSHOT_2_EUREKA_CONFIG = {
 SNAPSHOT_EUREKA_ECS_CONFIG = {
     "gateway_url": "https://ecs-folio-etesting-snapshot-kong.ci.folio.org",
     "tenant_id": "consortium",
-    "username": os.environ.get("FOLIO_EUREKA_USERNAME", "consortium_admin"),
-    "password": os.environ.get("FOLIO_EUREKA_PASSWORD", "admin"),
+    "username": os.environ.get("FOLIO_ECS_EUREKA_USERNAME", "consortium_admin"),
+    "password": os.environ.get("FOLIO_ECS_EUREKA_PASSWORD", "admin"),
 }
 
 # pragma: warning disable=SC2068
@@ -94,14 +94,11 @@ def server_config(request):
     Use environment variable INTEGRATION_SERVER to limit to a single config name,
     e.g. INTEGRATION_SERVER=snapshot pytest tests/integration_tests.py --run-integration
     """
-    desired = os.environ.get("INTEGRATION_SERVER") or request.config.getoption("--integration-server")
-    if desired:
-        # if the user requested a single server, only yield that config
-        for name, cfg in SERVER_CONFIGS:
-            if name == desired:
-                return cfg
-        pytest.skip(f"No server config named {desired}")
-    # request.param is the name; look up and return the dict
+    desired = request.config.getoption("--integration-server") or os.environ.get("INTEGRATION_SERVER")
+    name = request.param
+    if desired and name != desired:
+        pytest.skip(f"Skipping config '{name}' (only running '{desired}')")
+    # Default: parametrize over all configs
     name = request.param
     for n, cfg in SERVER_CONFIGS:
         if n == name:
