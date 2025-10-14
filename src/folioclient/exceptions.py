@@ -27,20 +27,21 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
-class FolioClientClosed(Exception):
-    """
-    Raised when an operation is attempted on a closed FolioClient.
-    """
-
-    def __init__(self, message: str = "The FolioClient is closed") -> None:
-        super().__init__(message)
-
 
 # Base FOLIO exceptions
 class FolioError(Exception):
     """Base exception for all FOLIO-related errors."""
 
     pass
+
+
+class FolioClientClosed(FolioError):
+    """
+    Raised when an operation is attempted on a closed FolioClient.
+    """
+
+    def __init__(self, message: str = "The FolioClient is closed") -> None:
+        super().__init__(message)
 
 
 # Connection and network errors
