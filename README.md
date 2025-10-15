@@ -465,4 +465,4 @@ FolioClient v1.0.0 introduces several backwards-incompatible changes. Please rev
 ### Removed methods
 - `get_random_objects`
 
-For detailed migration guidance, see the [documentation](docs/changelog.md).
+For detailed usage and migration guidance, see the [documentation](https://folioclient.readthedocs.io).
