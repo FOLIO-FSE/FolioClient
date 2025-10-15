@@ -310,30 +310,29 @@ except FolioAuthenticationError:
 ## Built-in Retry Logic
 FolioClient includes automatic retry logic powered by the modern **tenacity** library for certain error conditions:
 
-```Python
-# Automatic retries are built into FolioClient's FOLIO HTTP methods for:
-# - Authorization errors (403) - triggers automatic re-login and retry
-# - Server errors (502, 503, 504) - retries with exponential backoff
-# - Connection errors - retries with exponential backoff
-# - Remote protocol errors - recreates HTTP client and retries
-# 
-# Note: Authentication errors (401) are handled automatically by FolioAuth
+- Authorization errors (403) - triggers automatic re-login and retry
+- Server errors (502, 503, 504) - retries with exponential backoff
+- Connection errors - retries with exponential backoff
+- Remote protocol errors - recreates HTTP client and retries
 
+Note: Authentication errors (401) are handled automatically by FolioAuth
+
+```bash
 # Configure retry behavior via environment variables:
 
 # Server error retries:
-# FOLIOCLIENT_MAX_SERVER_ERROR_RETRIES=3 (default: 0 - no retries)
-# FOLIOCLIENT_SERVER_ERROR_RETRY_DELAY=10.0 (default: 10 seconds initial delay)
-# FOLIOCLIENT_SERVER_ERROR_RETRY_FACTOR=3.0 (default: 3x exponential backoff)
-# FOLIOCLIENT_SERVER_ERROR_MAX_WAIT=unlimited (default: no cap on wait time)
+FOLIOCLIENT_MAX_SERVER_ERROR_RETRIES=3 # (default: 0 - no retries)
+FOLIOCLIENT_SERVER_ERROR_RETRY_DELAY=10.0 # (default: 10 seconds initial delay)
+FOLIOCLIENT_SERVER_ERROR_RETRY_FACTOR=3.0 # (default: 3x exponential backoff)
+FOLIOCLIENT_SERVER_ERROR_MAX_WAIT=unlimited # (default: no cap on wait time)
 #   - Set to a number (e.g., "60") for max wait time in seconds
 #   - Set to "unlimited", "inf", or "none" for no cap
 
 # Auth error retries:
-# FOLIOCLIENT_MAX_AUTH_ERROR_RETRIES=2 (default: 0 - no retries)
-# FOLIOCLIENT_AUTH_ERROR_RETRY_DELAY=10.0 (default: 10 seconds initial delay)
-# FOLIOCLIENT_AUTH_ERROR_RETRY_FACTOR=3.0 (default: 3x exponential backoff)
-# FOLIOCLIENT_AUTH_ERROR_MAX_WAIT=60.0 (default: 60 seconds max wait)
+FOLIOCLIENT_MAX_AUTH_ERROR_RETRIES=2 (default: 0 - no retries)
+FOLIOCLIENT_AUTH_ERROR_RETRY_DELAY=10.0 (default: 10 seconds initial delay)
+FOLIOCLIENT_AUTH_ERROR_RETRY_FACTOR=3.0 (default: 3x exponential backoff)
+FOLIOCLIENT_AUTH_ERROR_MAX_WAIT=60.0 (default: 60 seconds max wait)
 #   - Auth errors typically resolve quickly, so lower default cap
 
 # Legacy environment variable support (for backward compatibility):
@@ -344,16 +343,17 @@ FolioClient includes automatic retry logic powered by the modern **tenacity** li
 ## Timeout Configuration
 FolioClient provides granular timeout control for HTTP connections. Configure using environment variables or constructor parameters:
 
-```Python
+```bash
 # Environment variables for global timeout configuration:
-# FOLIOCLIENT_CONNECT_TIMEOUT=30.0 (default: None - unlimited)
-# FOLIOCLIENT_READ_TIMEOUT=300.0 (default: None - unlimited)  
-# FOLIOCLIENT_WRITE_TIMEOUT=30.0 (default: None - unlimited)
-# FOLIOCLIENT_POOL_TIMEOUT=10.0 (default: None - unlimited)
+FOLIOCLIENT_CONNECT_TIMEOUT=30.0 # (default: None - unlimited)
+FOLIOCLIENT_READ_TIMEOUT=300.0 # (default: None - unlimited)  
+FOLIOCLIENT_WRITE_TIMEOUT=30.0 # (default: None - unlimited)
+FOLIOCLIENT_POOL_TIMEOUT=10.0 # (default: None - unlimited)
 
 # Legacy timeout support:
-# FOLIOCLIENT_HTTP_TIMEOUT=60 (applies to all timeout types, default: None - unlimited)
-
+FOLIOCLIENT_HTTP_TIMEOUT=60 # (applies to all timeout types, default: None - unlimited)
+```
+```python
 # Constructor timeout configuration:
 from folioclient import FolioClient
 import httpx
@@ -463,6 +463,6 @@ FolioClient v1.0.0 introduces several backwards-incompatible changes. Please rev
 - **`folio_token_expires` property** - Use `access_token_expires` instead
 
 ### Removed methods
-- **`get_random_objects`
+- `get_random_objects`
 
 For detailed migration guidance, see the [documentation](docs/changelog.md).
