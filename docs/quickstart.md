@@ -192,10 +192,18 @@ Always close the client when done:
 # Synchronous cleanup
 client.close()
 
+# Async cleanup
+await client.async_close
+
 # Or use context manager (recommended)
 with FolioClient(gateway_url="...", tenant_id="...", username="...", password="...") as client:
     users = client.folio_get("/users", "users")
     # Client automatically closed when exiting the block
+
+# Async context manager
+async with FolioClient(gateway_url="...", tenant_id="...", username="...", password="...") as client:
+    users = await client.folio_get_async("/users", "users")
+    ...
 ```
 
 ## Environment Variables

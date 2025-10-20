@@ -56,6 +56,8 @@ active_users = client.folio_get(
 # Process all records with pagination
 for user in client.folio_get_all("/users", "users"):
     print(f"Processing user: {user['username']}")
+
+client.close() # Close the client (or use a context manager)
 ```
 
 ### Async Usage

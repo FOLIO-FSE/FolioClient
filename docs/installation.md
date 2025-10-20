@@ -71,7 +71,7 @@ FolioClient is tested against:
 
 * **Python versions**: 3.10, 3.11, 3.12, 3.13, 3.14
 * **Operating systems**: Linux, macOS, Windows
-* **FOLIO versions**: All [officially supported FOLIO releases]()
+* **FOLIO versions**: All [officially supported FOLIO releases](https://folio-org.atlassian.net/wiki/spaces/TC/pages/1187348628/DR-000043+-+Support+period)
 
 ## Virtual Environment
 
@@ -79,7 +79,7 @@ We strongly recommend using a virtual environment:
 
 ```bash
 # Create virtual environment
-python -m venv folio-env
+uv venv folio-env # or python -m venv folio-env
 
 # Activate (Unix/macOS)
 source folio-env/bin/activate
@@ -88,7 +88,7 @@ source folio-env/bin/activate
 folio-env\Scripts\activate
 
 # Install FolioClient
-pip install folioclient
+uv pip install folioclient # or pip install folioclient if not using uv
 ```
 
 ## Verification

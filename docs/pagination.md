@@ -144,7 +144,7 @@ There is an async versions of `folio_get_all`: `folio_get_all_async`:
 import asyncio
 
 async def process_all_users_async():
-    async with FolioClient(...):    
+    async with FolioClient(...) as client:    
         try:
            async for user in client.folio_get_all_async("/users", "users"):
                print(f"Processing: {user['username']}")
