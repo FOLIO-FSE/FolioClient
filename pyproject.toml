@@ -33,6 +33,7 @@ dev = [
     "pytest-coverage>=0.0",
     "ty>=0.0.1a22",
     "types-pyyaml>=6.0.12.20250915",
+    "pyrefly>=0.37.0",
 ]
 docs = [
     "sphinx>=8.1.3",
