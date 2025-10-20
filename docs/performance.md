@@ -377,7 +377,7 @@ from asyncio import Semaphore
 
 async def optimized_processing():
     # Use experimental orjson if available
-    async with FolioClient(...):
+    async with FolioClient(...) as client:
         # Control concurrency
         semaphore = Semaphore(3)
        

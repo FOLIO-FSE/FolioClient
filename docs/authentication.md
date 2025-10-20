@@ -30,7 +30,7 @@ FolioClient uses FOLIO's token-based authentication system:
 4. **Session Management**: Tokens are managed transparently across sync and async operations
 
 :::{note}
-The auth flow will attempt to reauthenticate (using credentials provided when instantiating the FolioClient instance) whenever it receives a `401 (UNAUTHORIZED)` response from FOLIO in response to an `httpx.Request` and then resubmit the request that raised the `401`. `403 (FORBIDDEN)` errors are handled by the [new retry handling](./retry_configuration.md).
+The auth flow will attempt to reauthenticate (using credentials provided when instantiating the FolioClient instance) one minute before the token's original expiration time **or** whenever it receives a `401 (UNAUTHORIZED)` response from FOLIO in response to an `httpx.Request` and then resubmit the request that raised the `401`. `403 (FORBIDDEN)` errors are handled by the [new retry handling](./retry_configuration.md).
 :::
 
 ### Token Lifecycle
@@ -103,13 +103,13 @@ client = FolioClient(**config["folio"])
 Your FOLIO user account needs appropriate capabilities (Eureka FOLIO) or permissions (Okapi FOLIO) for the operations you want to perform:
 
 **Read Operations**
-: View permissions for relevant modules (users, inventory, etc.)
+: View capabilities/permissions for relevant modules (users, inventory, etc.)
 
 **Write Operations**
-: Create, edit, or delete permissions for relevant modules
+: Create, edit, or delete capabilities/permissions for relevant modules
 
 **Administrative Operations**
-: Administrative permissions may be required for some endpoints
+: Manage capabilities/permissions may be required for some endpoints
 
 ## Common Authentication Issues
 
@@ -199,17 +199,13 @@ import asyncio
 from folioclient import FolioClient
 
 async def main():
-    client = FolioClient(...)
+    async with FolioClient(...) as client:
     
-    try:
         # Authentication happens on first async call
         users = await client.folio_get_async("/users", "users")
-        
+
         # Subsequent calls use stored token
         groups = await client.folio_get_async("/groups", "usergroups")
-        
-    finally:
-        await client.close()
 
 asyncio.run(main())
 ```

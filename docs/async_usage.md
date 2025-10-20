@@ -26,7 +26,7 @@ async def main():
         print(f"Found {len(users)} users and {len(groups)} groups")
         
     finally:
-        await client.close()
+        await client.async_close()
 
 asyncio.run(main())
 ```
@@ -40,6 +40,7 @@ asyncio.run(main())
 | `folio_put()` | `folio_put_async()` |
 | `folio_delete()` | `folio_delete_async()` |
 | `folio_get_all()` | `folio_get_all_async()` |
+| `close()`   | `async_close()` |
 
 ## Async Pagination
 
@@ -47,18 +48,14 @@ Process large datasets asynchronously:
 
 ```python
 async def process_all_users():
-    client = FolioClient(...)
+    async with FolioClient(...)as client:
     
-    try:
         # Async iteration over all users
         async for user in client.folio_get_all_async("/users", "users"):
             print(f"Processing user: {user['username']}")
             
             # Perform async operations on each user
             await process_user_data(user)
-            
-    finally:
-        await client.close()
 
 asyncio.run(process_all_users())
 ```
@@ -72,9 +69,8 @@ import asyncio
 from folioclient import FolioClient
 
 async def fetch_multiple_resources():
-    client = FolioClient(...)
+    async with FolioClient(...) as client:
     
-    try:
         # Run multiple requests concurrently
         users_task = client.folio_get_async("/users", "users")
         groups_task = client.folio_get_async("/groups", "usergroups")
@@ -88,9 +84,6 @@ async def fetch_multiple_resources():
         )
         
         print(f"Loaded {len(users)} users, {len(groups)} groups, {len(locations)} locations")
-        
-    finally:
-        await client.close()
 
 asyncio.run(fetch_multiple_resources())
 ```
@@ -104,15 +97,14 @@ import asyncio
 from asyncio import Semaphore
 
 async def process_users_in_batches():
-    client = FolioClient(...)
-    semaphore = Semaphore(10)  # Limit to 10 concurrent operations
+    async with client = FolioClient(...) as client
+        semaphore = Semaphore(10)  # Limit to 10 concurrent operations
     
-    async def process_user_with_limit(user):
-        async with semaphore:
-            # Process one user with concurrency limit
-            return await process_user_details(client, user)
+        async def process_user_with_limit(user):
+            async with semaphore:
+                # Process one user with concurrency limit
+                return await process_user_details(client, user)
     
-    try:
         # Get all users
         users = await client.folio_get_async("/users", "users")
         
@@ -121,9 +113,6 @@ async def process_users_in_batches():
         results = await asyncio.gather(*tasks)
         
         print(f"Processed {len(results)} users")
-        
-    finally:
-        await client.close()
 
 async def process_user_details(client, user):
     # Fetch additional details for each user
@@ -154,9 +143,8 @@ async def robust_async_operations():
     os.environ['FOLIOCLIENT_MAX_SERVER_ERROR_RETRIES'] = '3'
     os.environ['FOLIOCLIENT_MAX_AUTH_ERROR_RETRIES'] = '2'
     
-    client = FolioClient(...)
+    async with FolioClient(...) as client:
     
-    try:
         # Async operations get automatic retry behavior
         tasks = []
         
@@ -171,9 +159,7 @@ async def robust_async_operations():
                 print(f"Task {i} failed: {result}")
             else:
                 print(f"Task {i} succeeded: {len(result)} items")
-                
-    finally:
-        await client.close()
+
 
 async def safe_fetch(client, endpoint):
     try:
@@ -231,22 +217,9 @@ async def concurrent_with_retries():
 Use async context managers for proper resource cleanup:
 
 ```python
-async def using_async_context_manager():
-    # Note: FolioClient doesn't support async context managers yet,
-    # but you can create your own wrapper
-    
-    class AsyncFolioClient:
-        def __init__(self, **kwargs):
-            self.client = FolioClient(**kwargs)
-        
-        async def __aenter__(self):
-            return self.client
-        
-        async def __aexit__(self, exc_type, exc_val, exc_tb):
-            await self.client.close()
-    
+async def using_async_context_manager():    
     # Usage
-    async with AsyncFolioClient(folio_url="...", tenant="...", 
+    async with FolioClient(folio_url="...", tenant="...", 
                                 username="...", password="...") as client:
         users = await client.folio_get_async("/users", "users")
         # Client automatically closed
@@ -281,7 +254,7 @@ async def get_users(limit: int = 100):
 
 @app.on_event("shutdown")
 async def shutdown():
-    await folio_client.close()
+    await folio_client.async_close()
 ```
 
 ### Aiohttp Integration
@@ -331,6 +304,7 @@ if __name__ == '__main__':
 3. **Handle exceptions** at appropriate levels
 4. **Always close clients** when done
 5. **Use connection pooling** for multiple clients
+6. **Use a context manager** to ensure a persistent httpx.AsyncClient session and proper resource clean-up
 
 ```python
 # Good async pattern
@@ -353,7 +327,7 @@ async def efficient_processing():
         print(f"Processed: {len(successful)}, Failed: {len(failed)}")
         
     finally:
-        await client.close()
+        await client.async_close()
 ```
 
 ## Testing Async Code
@@ -398,7 +372,7 @@ async def debug_example():
     try:
         users = await client.folio_get_async("/users", "users")
     finally:
-        await client.close()
+        await client.async_close()
 
 asyncio.run(debug_example())
 ```
