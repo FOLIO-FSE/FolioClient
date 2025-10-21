@@ -275,7 +275,7 @@ class FolioClient:
             ssl_verify=ssl_verify,
             timeout=timeout_value,
         )
-        self.folio_auth: FolioAuth = FolioAuth(self.folio_parameters)
+        self.login()
         self.base_headers = {
             "content-type": CONTENT_TYPE_JSON,
         }
@@ -1276,11 +1276,14 @@ class FolioClient:
         Raises:
             FolioClientClosed: If the client has been closed.
         """
-        self.validate_client_open()
-        with self.folio_auth._lock:
-            self.folio_auth._token = (
-                self.folio_auth._do_sync_auth()
-            )  # Force re-authentication if needed
+        if not hasattr(self, "folio_auth"):
+            self.folio_auth: FolioAuth = FolioAuth(self.folio_parameters)
+        else:
+            self.validate_client_open()
+            with self.folio_auth._lock:
+                self.folio_auth._token = (
+                    self.folio_auth._do_sync_auth()
+                )  # Force re-authentication if needed
 
     @folio_retry_on_server_error
     async def async_login(self) -> None:
