@@ -10,6 +10,22 @@ license = "MIT"
 readme = "README.md"
 keywords = ["FOLIO", "ILS", "LSP", "Library Systems", "MARC21", "Library data"]
 requires-python = ">=3.10,<4.0"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: MIT License",
+    
+    # Audience
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+
+    # Supported python versions
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
     "httpx>=0.28.1",
     "jsonref>=1.1.0",
@@ -46,7 +62,7 @@ orjson = ["orjson>=3.11.3,<4.0.0"]
 
 # Build
 [build-system]
-requires = ["uv_build>=0.8.6,<0.9.0"]
+requires = ["uv_build>=0.9.3,<0.10.0"]
 build-backend = "uv_build"
 
 # Linting
