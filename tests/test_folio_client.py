@@ -445,7 +445,7 @@ def test_logout_response_handler_branches(mock_ecs_check):
         err_404 = httpx.HTTPStatusError("404", request=Mock(), response=mock_resp_404)
         mock_resp_404.raise_for_status.side_effect = err_404
         # Should not raise
-        fc.logout_response_handler(mock_resp_404)
+        fc._logout_response_handler(mock_resp_404)
 
         # 500 HTTPStatusError path
         mock_resp_500 = Mock()
@@ -453,12 +453,12 @@ def test_logout_response_handler_branches(mock_ecs_check):
         mock_resp_500.text = "oops"
         err_500 = httpx.HTTPStatusError("500", request=Mock(), response=mock_resp_500)
         mock_resp_500.raise_for_status.side_effect = err_500
-        fc.logout_response_handler(mock_resp_500)
+        fc._logout_response_handler(mock_resp_500)
 
         # ConnectError path
         mock_conn = Mock()
         mock_conn.raise_for_status.side_effect = httpx.ConnectError("nope")
-        fc.logout_response_handler(mock_conn)
+        fc._logout_response_handler(mock_conn)
 
 
 @patch.object(FolioClient, '_initial_ecs_check')

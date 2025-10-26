@@ -340,7 +340,7 @@ class FolioClient:
             logout = self.httpx_client.post(
                 urljoin(self.gateway_url, "authn/logout"),
             )
-            self.logout_response_handler(logout)
+            self._logout_response_handler(logout)
         else:
             logger.debug("No active Client session found, skipping logout.")
         if hasattr(self, "httpx_client") and self.httpx_client and not self.httpx_client.is_closed:
@@ -349,7 +349,8 @@ class FolioClient:
         self._cleanup_folio_auth()
         self.is_closed = True
 
-    def logout_response_handler(self, logout):
+    def _logout_response_handler(self, logout):
+        """Private method to handle logout response exceptions"""
         try:
             logout.raise_for_status()
             logger.info("Logged out")
@@ -396,7 +397,7 @@ class FolioClient:
             logout = await self.async_httpx_client.post(
                 urljoin(self.gateway_url, "authn/logout"),
             )
-            self.logout_response_handler(logout)
+            self._logout_response_handler(logout)
         else:
             logger.debug("No active AsyncClient session found, skipping logout.")
         if (
