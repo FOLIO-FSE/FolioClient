@@ -1,6 +1,6 @@
 [project]
 name = "folioclient"
-version = "1.0.2.post1"
+version = "1.0.3"
 description = "An API wrapper over the FOLIO LSP API Suite (Formerly OKAPI)."
 authors = [
     { name = "Theodor Tolstoy", email = "github.teddes@tolstoy.se" },
@@ -20,6 +20,7 @@ classifiers = [
     "Intended Audience :: System Administrators",
 
     # Supported python versions
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
