@@ -503,10 +503,12 @@ class FolioClient:
 
     @property
     def tenant_id(self) -> str:
+        """The active tenant ID."""
         return self.folio_auth.tenant_id
 
     @tenant_id.setter
     def tenant_id(self, tenant_id: str) -> None:
+        """Set the active tenant ID and clear cached properties."""
         if self.is_ecs:
             tenant_map = {t["id"]: t["name"] for t in self.ecs_members}
             logger.info(
@@ -1073,6 +1075,7 @@ class FolioClient:
 
     @property
     def refresh_token(self) -> str:
+        """Property that returns the current authentication refresh token."""
         self.validate_client_open()
         _ = self.access_token  # Ensure token is valid
         return self.folio_auth.folio_refresh_token
