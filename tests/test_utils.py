@@ -25,12 +25,17 @@ def folio_auth_patcher():
     # Instead of trying to mock the whole class, patch the problematic methods
     # This is more reliable as it doesn't deal with import timing issues
     from datetime import datetime, timezone, timedelta
+    import httpx
     
     mock_token = Mock()
     mock_token.auth_token = "test-token"
     mock_token.refresh_token = "test-refresh-token"
     # Set expires_at to a future datetime to avoid expiration issues
     mock_token.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    # Mock cookies as an httpx.Cookies object (which is iterable)
+    mock_token.cookies = httpx.Cookies()
+    mock_token.cookies.set("folioAccessToken", "test-token")
+    mock_token.cookies.set("folioRefreshToken", "test-refresh-token")
     
     with patch('folioclient._httpx.FolioAuth._do_sync_auth', return_value=mock_token), \
          patch('folioclient._httpx.FolioAuth._token_is_expiring', return_value=False):
