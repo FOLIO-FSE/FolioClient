@@ -44,7 +44,7 @@ def should_retry_auth_error(exc):
     returns:
         True if the request should be retried, False otherwise
     """
-    return exc.response.status_code == HTTPStatus.FORBIDDEN
+    return exc.response.status_code == HTTPStatus.FORBIDDEN if hasattr(exc, "response") else False
 
 
 # Custom retry condition classes for tenacity
