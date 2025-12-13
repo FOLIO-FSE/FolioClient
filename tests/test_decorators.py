@@ -21,7 +21,12 @@ from folioclient.decorators import (
     auth_refresh_callback,
     use_client_session,
     use_client_session_with_generator,
+    auth_refresh_callback,
+    use_client_session,
+    use_client_session_with_generator,
 )
+from folioclient.exceptions import FolioConnectionError
+
 
 acceptable_errors_side_effect = [
     httpx.HTTPStatusError("error 502", request=None, response=SimpleNamespace(status_code=502)),
@@ -651,6 +656,15 @@ def test_should_retry_server_error_and_auth():
     # Auth retry helper
     assert should_retry_auth_error(SimpleNamespace(response=SimpleNamespace(status_code=403))) is True
     assert should_retry_auth_error(SimpleNamespace(response=SimpleNamespace(status_code=401))) is False
+    
+    # Test exceptions without response attribute (e.g., FolioConnectionError)
+    # should_retry_auth_error should handle missing response attribute gracefully
+    exception_without_response = SimpleNamespace(message="No response attribute")
+    assert should_retry_auth_error(exception_without_response) is False
+    
+    # Even plain exceptions should not cause AttributeError
+    plain_exception = Exception("Plain exception")
+    assert should_retry_auth_error(plain_exception) is False
 
 
 def test_retry_condition_classes():
@@ -679,6 +693,27 @@ def test_retry_condition_classes():
     auth_cond = AuthErrorRetryCondition()
     assert auth_cond(FakeState(FakeOutcome(False))) is False
     assert auth_cond(FakeState(FakeOutcome(True, httpx.HTTPStatusError("", request=None, response=SimpleNamespace(status_code=403))))) is True
+
+
+def test_should_retry_auth_error_with_folio_connection_error():
+    """Test that should_retry_auth_error handles FolioConnectionError without AttributeError.
+    
+    FolioConnectionError has a 'request' attribute but no 'response' attribute.
+    This test ensures the hasattr check prevents AttributeError when checking
+    for response.status_code.
+    """
+    # Create a mock request
+    mock_request = Mock(spec=httpx.Request)
+    
+    # Create a FolioConnectionError (has request but no response)
+    folio_error = FolioConnectionError("Connection failed", request=mock_request)
+    
+    # This should return False without raising AttributeError
+    assert should_retry_auth_error(folio_error) is False
+    
+    # Verify the exception doesn't have a response attribute
+    assert not hasattr(folio_error, 'response')
+    assert hasattr(folio_error, 'request')
 
 
 def test_auth_refresh_callback_invokes_login(monkeypatch):
