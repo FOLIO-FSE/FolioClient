@@ -642,10 +642,11 @@ class FolioClient:
             prop_name (str): Name of the property to clear.
         """
         # Verify it's actually a cached property before deleting
+        # Use __dict__ to check if value is cached without triggering property evaluation
         if (
             hasattr(self.__class__, prop_name)
             and self._is_cached_property(prop_name)
-            and hasattr(self, prop_name)
+            and prop_name in self.__dict__
         ):
             delattr(self, prop_name)
 
