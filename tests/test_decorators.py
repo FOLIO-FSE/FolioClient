@@ -21,12 +21,8 @@ from folioclient.decorators import (
     auth_refresh_callback,
     use_client_session,
     use_client_session_with_generator,
-    auth_refresh_callback,
-    use_client_session,
-    use_client_session_with_generator,
 )
 from folioclient.exceptions import FolioConnectionError
-
 
 acceptable_errors_side_effect = [
     httpx.HTTPStatusError("error 502", request=None, response=SimpleNamespace(status_code=502)),
@@ -1532,4 +1528,3 @@ def test_get_auth_retry_config_numeric_and_none(monkeypatch):
     monkeypatch.setenv("FOLIOCLIENT_AUTH_ERROR_MAX_WAIT", "inf")
     cfg2 = get_auth_retry_config()
     assert "stop" in cfg2 and "wait" in cfg2
-
