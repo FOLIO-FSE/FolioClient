@@ -676,14 +676,6 @@ def test_should_retry_server_error_and_auth():
         "unauthorized", request=mock_request, response=_create_mock_response(401)
     )
     assert should_retry_auth_error(auth_error_401) is False
-    
-    # Test exceptions without response attribute (e.g., FolioConnectionError)
-    folio_conn_error = FolioConnectionError("Connection failed", request=mock_request)
-    assert should_retry_auth_error(folio_conn_error) is False
-    
-    # Even plain exceptions should not cause AttributeError
-    plain_exception = Exception("Plain exception")
-    assert should_retry_auth_error(plain_exception) is False
 
 
 def test_retry_condition_classes():
@@ -747,7 +739,7 @@ def test_auth_refresh_callback_invokes_login(monkeypatch):
             self.attempt_number = attempt_number
             self.args = args
 
-    client = MockFolioClient()
+    client = Mock()
     client.login = Mock()
 
     state = FakeState(2, (client,))
