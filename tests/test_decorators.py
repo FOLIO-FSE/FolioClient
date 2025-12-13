@@ -2,7 +2,6 @@
 
 import inspect
 import time
-from types import SimpleNamespace
 import types
 import httpx
 import pytest
@@ -24,20 +23,28 @@ from folioclient.decorators import (
 )
 from folioclient.exceptions import FolioConnectionError
 
+
+def _create_mock_response(status_code: int) -> Mock:
+    """Helper to create a mock httpx.Response with a status code."""
+    mock_response = Mock(spec=httpx.Response)
+    mock_response.status_code = status_code
+    return mock_response
+
+
 acceptable_errors_side_effect = [
-    httpx.HTTPStatusError("error 502", request=None, response=SimpleNamespace(status_code=502)),
-    httpx.HTTPStatusError("error 503", request=None, response=SimpleNamespace(status_code=503)),
-    httpx.HTTPStatusError("error 504", request=None, response=SimpleNamespace(status_code=504)),
+    httpx.HTTPStatusError("error 502", request=None, response=_create_mock_response(502)),
+    httpx.HTTPStatusError("error 503", request=None, response=_create_mock_response(503)),
+    httpx.HTTPStatusError("error 504", request=None, response=_create_mock_response(504)),
     "test",
 ]
 
 all_errors_side_effect = acceptable_errors_side_effect.copy()
 all_errors_side_effect.insert(
-    3, httpx.HTTPStatusError("error 500", request=None, response=SimpleNamespace(status_code=500))
+    3, httpx.HTTPStatusError("error 500", request=None, response=_create_mock_response(500))
 )
 
 acceptable_auth_errors_side_effect = [
-    httpx.HTTPStatusError("error 403", request=None, response=SimpleNamespace(status_code=403)),
+    httpx.HTTPStatusError("error 403", request=None, response=_create_mock_response(403)),
     "test",
 ]
 
@@ -72,7 +79,7 @@ def test_fails_default_auth(_):
     internal_fn = Mock(
         return_value="test",
         side_effect=[
-            httpx.HTTPStatusError("test", request=None, response=SimpleNamespace(status_code=401)),
+            httpx.HTTPStatusError("test", request=None, response=_create_mock_response(401)),
             "test",
         ],
     )
@@ -91,7 +98,7 @@ def test_fails_default(_):
     internal_fn = Mock(
         return_value="test",
         side_effect=[
-            httpx.HTTPStatusError("test", request=None, response=SimpleNamespace(status_code=502)),
+            httpx.HTTPStatusError("test", request=None, response=_create_mock_response(502)),
             "test",
         ],
     )
@@ -113,7 +120,7 @@ def test_handles_single_fail(_):
     internal_fn = Mock(
         return_value="test",
         side_effect=[
-            httpx.HTTPStatusError("test", request=None, response=SimpleNamespace(status_code=502)),
+            httpx.HTTPStatusError("test", request=None, response=_create_mock_response(502)),
             "test",
         ],
     )
@@ -136,7 +143,7 @@ def test_handles_single_fail_auth(_):
     internal_fn = Mock(
         return_value="test",
         side_effect=[
-            httpx.HTTPStatusError("test", request=None, response=SimpleNamespace(status_code=403)),
+            httpx.HTTPStatusError("test", request=None, response=_create_mock_response(403)),
             "test",
         ],
     )
@@ -637,26 +644,42 @@ class TestHandleRemoteProtocolErrorDecorator:
 
 
 def test_should_retry_server_error_and_auth():
+    mock_request = Mock(spec=httpx.Request)
+    
     # ConnectError should retry
-    assert should_retry_server_error(httpx.ConnectError("c", request=None)) is True
+    assert should_retry_server_error(httpx.ConnectError("c", request=mock_request)) is True
 
     # HTTP status 502/503/504 should retry
-    assert should_retry_server_error(httpx.HTTPStatusError("", request=None, response=SimpleNamespace(status_code=502))) is True
-    assert should_retry_server_error(httpx.HTTPStatusError("", request=None, response=SimpleNamespace(status_code=503))) is True
-    assert should_retry_server_error(httpx.HTTPStatusError("", request=None, response=SimpleNamespace(status_code=504))) is True
+    assert should_retry_server_error(
+        httpx.HTTPStatusError("", request=mock_request, response=_create_mock_response(502))
+    ) is True
+    assert should_retry_server_error(
+        httpx.HTTPStatusError("", request=mock_request, response=_create_mock_response(503))
+    ) is True
+    assert should_retry_server_error(
+        httpx.HTTPStatusError("", request=mock_request, response=_create_mock_response(504))
+    ) is True
 
     # Other HTTP statuses should not retry
-    assert should_retry_server_error(httpx.HTTPStatusError("", request=None, response=SimpleNamespace(status_code=500))) is False
+    assert should_retry_server_error(
+        httpx.HTTPStatusError("", request=mock_request, response=_create_mock_response(500))
+    ) is False
     assert should_retry_server_error(ValueError("boom")) is False
 
-    # Auth retry helper
-    assert should_retry_auth_error(SimpleNamespace(response=SimpleNamespace(status_code=403))) is True
-    assert should_retry_auth_error(SimpleNamespace(response=SimpleNamespace(status_code=401))) is False
+    # Auth retry helper - test with actual httpx.HTTPStatusError
+    auth_error_403 = httpx.HTTPStatusError(
+        "forbidden", request=mock_request, response=_create_mock_response(403)
+    )
+    assert should_retry_auth_error(auth_error_403) is True
+    
+    auth_error_401 = httpx.HTTPStatusError(
+        "unauthorized", request=mock_request, response=_create_mock_response(401)
+    )
+    assert should_retry_auth_error(auth_error_401) is False
     
     # Test exceptions without response attribute (e.g., FolioConnectionError)
-    # should_retry_auth_error should handle missing response attribute gracefully
-    exception_without_response = SimpleNamespace(message="No response attribute")
-    assert should_retry_auth_error(exception_without_response) is False
+    folio_conn_error = FolioConnectionError("Connection failed", request=mock_request)
+    assert should_retry_auth_error(folio_conn_error) is False
     
     # Even plain exceptions should not cause AttributeError
     plain_exception = Exception("Plain exception")
@@ -683,12 +706,17 @@ def test_retry_condition_classes():
     assert cond(FakeState(FakeOutcome(False))) is False
 
     # When failed with ConnectError -> True
-    assert cond(FakeState(FakeOutcome(True, httpx.ConnectError("x", request=None)))) is True
+    mock_request = Mock(spec=httpx.Request)
+    assert cond(FakeState(FakeOutcome(True, httpx.ConnectError("x", request=mock_request)))) is True
 
     # AuthErrorRetryCondition
     auth_cond = AuthErrorRetryCondition()
     assert auth_cond(FakeState(FakeOutcome(False))) is False
-    assert auth_cond(FakeState(FakeOutcome(True, httpx.HTTPStatusError("", request=None, response=SimpleNamespace(status_code=403))))) is True
+    
+    auth_error = httpx.HTTPStatusError(
+        "forbidden", request=mock_request, response=_create_mock_response(403)
+    )
+    assert auth_cond(FakeState(FakeOutcome(True, auth_error))) is True
 
 
 def test_should_retry_auth_error_with_folio_connection_error():
@@ -719,7 +747,7 @@ def test_auth_refresh_callback_invokes_login(monkeypatch):
             self.attempt_number = attempt_number
             self.args = args
 
-    client = SimpleNamespace()
+    client = MockFolioClient()
     client.login = Mock()
 
     state = FakeState(2, (client,))
