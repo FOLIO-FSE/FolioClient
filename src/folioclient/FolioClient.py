@@ -2440,6 +2440,9 @@ def prepare_payload(payload: Dict | str) -> bytes:
 
     Returns:
         bytes: The JSON-encoded payload as bytes.
+
+    Raises:
+        TypeError: If the payload is not a dict or str.
     """
     if isinstance(payload, dict):
         if _HAS_ORJSON:
