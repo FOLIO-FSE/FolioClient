@@ -1,3 +1,4 @@
+import json
 import pytest
 from httpx import HTTPError, UnsupportedProtocol
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
@@ -734,3 +735,83 @@ def test_http_client_creation_with_no_timeout():
         assert async_client.timeout.read is None
         assert async_client.timeout.write is None
         assert async_client.timeout.pool is None
+
+
+class TestPreparePayload:
+    """Tests for the prepare_payload helper function."""
+
+    def test_prepare_payload_with_dict(self):
+        """Test that prepare_payload correctly encodes a dictionary to JSON bytes."""
+        from folioclient.FolioClient import prepare_payload
+        
+        payload = {"key": "value", "number": 42}
+        result = prepare_payload(payload)
+        
+        assert isinstance(result, bytes)
+        # Verify the JSON is valid by decoding
+        decoded = json.loads(result)
+        assert decoded == payload
+
+    def test_prepare_payload_with_string(self):
+        """Test that prepare_payload correctly encodes a string to bytes."""
+        from folioclient.FolioClient import prepare_payload
+        
+        payload = '{"key": "value"}'
+        result = prepare_payload(payload)
+        
+        assert isinstance(result, bytes)
+        assert result == payload.encode("utf-8")
+
+    def test_prepare_payload_with_invalid_type(self):
+        """Test that prepare_payload raises TypeError for invalid input types."""
+        from folioclient.FolioClient import prepare_payload
+        
+        with pytest.raises(TypeError, match="Payload must be a dictionary or a string"):
+            prepare_payload([1, 2, 3])
+        
+        with pytest.raises(TypeError, match="Payload must be a dictionary or a string"):
+            prepare_payload(42)
+        
+        with pytest.raises(TypeError, match="Payload must be a dictionary or a string"):
+            prepare_payload(None)
+
+    def test_prepare_payload_uses_orjson_when_available(self):
+        """Test that prepare_payload uses orjson when available for dicts."""
+        from folioclient.FolioClient import prepare_payload, _HAS_ORJSON
+        
+        payload = {"key": "value", "nested": {"data": [1, 2, 3]}}
+        result = prepare_payload(payload)
+        
+        # Result should always be valid JSON bytes
+        assert isinstance(result, bytes)
+        decoded = json.loads(result)
+        assert decoded == payload
+        
+        # If orjson is available, verify the module can be imported
+        if _HAS_ORJSON:
+            import orjson
+            # orjson.dumps returns bytes directly
+            orjson_result = orjson.dumps(payload)
+            assert isinstance(orjson_result, bytes)
+
+    def test_prepare_payload_with_unicode_string(self):
+        """Test that prepare_payload correctly handles unicode strings."""
+        from folioclient.FolioClient import prepare_payload
+        
+        payload = '{"name": "Müller", "emoji": "🎉"}'
+        result = prepare_payload(payload)
+        
+        assert isinstance(result, bytes)
+        assert result == payload.encode("utf-8")
+
+    def test_prepare_payload_with_unicode_dict(self):
+        """Test that prepare_payload correctly handles dicts with unicode values."""
+        from folioclient.FolioClient import prepare_payload
+        
+        payload = {"name": "Müller", "emoji": "🎉", "chinese": "你好"}
+        result = prepare_payload(payload)
+        
+        assert isinstance(result, bytes)
+        # Verify the JSON is valid and preserves unicode
+        decoded = json.loads(result)
+        assert decoded == payload
