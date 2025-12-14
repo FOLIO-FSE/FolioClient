@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import logging
 import threading
 import httpx
 
@@ -11,6 +12,8 @@ from typing import TYPE_CHECKING, NamedTuple, Optional
 if TYPE_CHECKING:  # pragma: no cover
     from collections.abc import AsyncGenerator, Generator
     import ssl
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,7 @@ class FolioAuth(httpx.Auth):
 
     @tenant_id.setter
     def tenant_id(self, value: str):
+        logger.debug("Setting tenant_id to %s", value)
         if value != self._tenant_id:
             self._tenant_id = value
 
@@ -88,6 +92,7 @@ class FolioAuth(httpx.Auth):
         response = yield request
 
         if response.status_code == HTTPStatus.UNAUTHORIZED:
+            logger.debug("Received 401 Unauthorized, refreshing token")
             with self._lock:
                 if self._token and not self._token_is_expiring():
                     # Another thread refreshed the token while we were waiting for the lock
@@ -124,6 +129,7 @@ class FolioAuth(httpx.Auth):
         response = yield request
 
         if response.status_code == HTTPStatus.UNAUTHORIZED:
+            logger.debug("Received 401 Unauthorized, refreshing token")
             with self._lock:
                 if self._token and not self._token_is_expiring():
                     # Another thread refreshed the token while we were waiting for the lock
@@ -154,6 +160,7 @@ class FolioAuth(httpx.Auth):
         auth_data = {"username": self._params.username, "password": self._params.password}
 
         with httpx.Client(timeout=self._params.timeout, verify=self._params.ssl_verify) as client:
+            logger.debug("Authenticating synchronously with URL: %s", auth_url)
             response = client.post(auth_url, json=auth_data, headers=headers)
             response.raise_for_status()
 
@@ -193,6 +200,7 @@ class FolioAuth(httpx.Auth):
         async with httpx.AsyncClient(
             timeout=self._params.timeout, verify=self._params.ssl_verify
         ) as client:
+            logger.debug("Authenticating asynchronously with URL: %s", auth_url)
             response = await client.post(auth_url, json=auth_data, headers=headers)
             response.raise_for_status()
 
