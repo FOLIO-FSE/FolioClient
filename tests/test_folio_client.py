@@ -815,3 +815,204 @@ class TestPreparePayload:
         # Verify the JSON is valid and preserves unicode
         decoded = json.loads(result)
         assert decoded == payload
+
+
+@patch.object(FolioClient, '_initial_ecs_check')
+class TestPostPutPayloadTypes:
+    """Tests for folio_post and folio_put with different payload types."""
+
+    def test_folio_post_with_dict_payload(self, mock_ecs_check):
+        """Test that folio_post works with dict payload."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+            
+            with patch.object(FolioClient, 'get_folio_http_client') as mock_get_client:
+                # Mock the httpx client with context manager support
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 201
+                mock_response.json.return_value = {"id": "123", "name": "test"}
+                mock_response.content = b'{"id": "123", "name": "test"}'
+                mock_response.raise_for_status.return_value = None
+                mock_client.post.return_value = mock_response
+                mock_client.is_closed = False
+                mock_client.__enter__.return_value = mock_client
+                mock_client.__exit__.return_value = False
+                mock_get_client.return_value = mock_client
+                
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+                
+                payload = {"name": "test", "value": 42}
+                result = fc.folio_post("/test", payload)
+                
+                # Verify the call was made with bytes data
+                mock_client.post.assert_called_once()
+                call_args = mock_client.post.call_args
+                assert call_args[0][0] == "test"
+                assert isinstance(call_args[1]["data"], bytes)
+                assert result == {"id": "123", "name": "test"}
+
+    def test_folio_post_with_string_payload(self, mock_ecs_check):
+        """Test that folio_post works with JSON string payload."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+            
+            with patch.object(FolioClient, 'get_folio_http_client') as mock_get_client:
+                # Mock the httpx client with context manager support
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 201
+                mock_response.json.return_value = {"id": "456", "status": "created"}
+                mock_response.content = b'{"id": "456", "status": "created"}'
+                mock_response.raise_for_status.return_value = None
+                mock_client.post.return_value = mock_response
+                mock_client.is_closed = False
+                mock_client.__enter__.return_value = mock_client
+                mock_client.__exit__.return_value = False
+                mock_get_client.return_value = mock_client
+                
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+                
+                payload = '{"name": "test", "value": 42}'
+                result = fc.folio_post("/test", payload)
+                
+                # Verify the call was made with bytes data
+                mock_client.post.assert_called_once()
+                call_args = mock_client.post.call_args
+                assert isinstance(call_args[1]["data"], bytes)
+                assert call_args[1]["data"] == payload.encode("utf-8")
+                assert result == {"id": "456", "status": "created"}
+
+    def test_folio_put_with_dict_payload(self, mock_ecs_check):
+        """Test that folio_put works with dict payload."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+            
+            with patch.object(FolioClient, 'get_folio_http_client') as mock_get_client:
+                # Mock the httpx client with context manager support
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 204
+                mock_response.json.return_value = None
+                mock_response.content = b''
+                mock_response.raise_for_status.return_value = None
+                mock_client.put.return_value = mock_response
+                mock_client.is_closed = False
+                mock_client.__enter__.return_value = mock_client
+                mock_client.__exit__.return_value = False
+                mock_get_client.return_value = mock_client
+                
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+                
+                payload = {"id": "123", "name": "updated"}
+                result = fc.folio_put("/test/123", payload)
+                
+                # Verify the call was made with bytes data
+                mock_client.put.assert_called_once()
+                call_args = mock_client.put.call_args
+                assert call_args[0][0] == "test/123"
+                assert isinstance(call_args[1]["data"], bytes)
+
+    def test_folio_put_with_string_payload(self, mock_ecs_check):
+        """Test that folio_put works with JSON string payload."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+            
+            with patch.object(FolioClient, 'get_folio_http_client') as mock_get_client:
+                # Mock the httpx client with context manager support
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 204
+                mock_response.json.return_value = None
+                mock_response.content = b''
+                mock_response.raise_for_status.return_value = None
+                mock_client.put.return_value = mock_response
+                mock_client.is_closed = False
+                mock_client.__enter__.return_value = mock_client
+                mock_client.__exit__.return_value = False
+                mock_get_client.return_value = mock_client
+                
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+                
+                payload = '{"id": "123", "name": "updated"}'
+                result = fc.folio_put("/test/123", payload)
+                
+                # Verify the call was made with bytes data
+                mock_client.put.assert_called_once()
+                call_args = mock_client.put.call_args
+                assert isinstance(call_args[1]["data"], bytes)
+                assert call_args[1]["data"] == payload.encode("utf-8")
+
+    @pytest.mark.asyncio
+    async def test_folio_post_async_with_dict_payload(self, mock_ecs_check):
+        """Test that folio_post_async works with dict payload."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+            
+            with patch.object(FolioClient, 'get_folio_http_client_async') as mock_get_client:
+                # Mock the async httpx client with async context manager support
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 201
+                mock_response.json.return_value = {"id": "789", "async": True}
+                mock_response.content = b'{"id": "789", "async": true}'
+                mock_response.raise_for_status = Mock(return_value=None)
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.is_closed = False
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_get_client.return_value = mock_client
+                
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+                
+                payload = {"name": "async_test", "value": 100}
+                result = await fc.folio_post_async("/test", payload)
+                
+                # Verify the call was made with bytes data
+                mock_client.post.assert_called_once()
+                call_args = mock_client.post.call_args
+                assert isinstance(call_args[1]["data"], bytes)
+                assert result == {"id": "789", "async": True}
+
+    @pytest.mark.asyncio
+    async def test_folio_put_async_with_string_payload(self, mock_ecs_check):
+        """Test that folio_put_async works with JSON string payload."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+            
+            with patch.object(FolioClient, 'get_folio_http_client_async') as mock_get_client:
+                # Mock the async httpx client with async context manager support
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 204
+                mock_response.json.return_value = None
+                mock_response.content = b''
+                mock_response.raise_for_status = Mock(return_value=None)
+                mock_client.put = AsyncMock(return_value=mock_response)
+                mock_client.is_closed = False
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_get_client.return_value = mock_client
+                
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+                
+                payload = '{"id": "999", "name": "async_updated"}'
+                result = await fc.folio_put_async("/test/999", payload)
+                
+                # Verify the call was made with bytes data
+                mock_client.put.assert_called_once()
+                call_args = mock_client.put.call_args
+                assert isinstance(call_args[1]["data"], bytes)
+                assert call_args[1]["data"] == payload.encode("utf-8")
