@@ -42,12 +42,6 @@ try:  # pragma: no cover # TODO: remove pragma when this is out of beta
     else:
         _HAS_ORJSON = False
 
-    def _orjson_loads(data):
-        return orjson.loads(data)
-
-    def _orjson_dumps(obj):  # noqa: F841
-        return orjson.dumps(obj).decode("utf-8")
-
     # Define exception tuples for different operations
     JSON_DECODE_ERRORS = (json.JSONDecodeError, orjson.JSONDecodeError)  # type: ignore
     JSON_ENCODE_ERRORS = (TypeError, orjson.JSONEncodeError)  # type: ignore
@@ -1349,7 +1343,7 @@ class FolioClient:
         """
         try:
             if _HAS_ORJSON:
-                return _orjson_loads(response.content)
+                return orjson.loads(response.content)
             else:
                 return response.json()
         except JSON_DECODE_ERRORS:  # Catch both JSONDecodeError types
@@ -1450,7 +1444,7 @@ class FolioClient:
 
         try:
             if _HAS_ORJSON:
-                return _orjson_loads(response.content)
+                return orjson.loads(response.content)
             else:
                 return response.json()
         except JSON_DECODE_ERRORS:  # Catch both JSONDecodeError types
@@ -1913,7 +1907,7 @@ class FolioClient:
 
         Args:
             path (str): FOLIO API endpoint path.
-            payload (dict): The data to update as JSON.
+            payload (dict or str): The data to update as JSON dict or JSON string.
             query_params (dict, optional): Additional query parameters. Defaults to None.
 
         Returns:
@@ -1934,9 +1928,10 @@ class FolioClient:
         """
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
+        payload = prepare_payload(payload)
         req = self.httpx_client.put(
             path,
-            json=payload,
+            data=payload,
             params=query_params,
         )
         req.raise_for_status()
@@ -1953,7 +1948,7 @@ class FolioClient:
 
         Args:
             path (str): FOLIO API endpoint path.
-            payload (dict): The data to update as JSON.
+            payload (dict or str): The data to update as JSON dict or JSON string.
             query_params (dict, optional): Additional query parameters. Defaults to None.
 
         Returns:
@@ -1961,9 +1956,10 @@ class FolioClient:
             None: If the response is empty.
         """
         path = path.lstrip("/")
+        payload = prepare_payload(payload)
         req = await self.async_httpx_client.put(
             path,
-            json=payload,
+            data=payload,
             params=query_params,
         )
         req.raise_for_status()
@@ -1980,7 +1976,7 @@ class FolioClient:
 
         Args:
             path (str): FOLIO API endpoint path.
-            payload (dict): The data to post as JSON.
+            payload (dict or str): The data to post as JSON dict or JSON string.
             query_params (dict, optional): Additional query parameters. Defaults to None.
 
         Returns:
@@ -2000,9 +1996,10 @@ class FolioClient:
         """
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
+        payload = prepare_payload(payload)
         req = self.httpx_client.post(
             path,
-            json=payload,
+            data=payload,
             params=query_params,
         )
         req.raise_for_status()
@@ -2019,7 +2016,7 @@ class FolioClient:
 
         Args:
             path (str): FOLIO API endpoint path.
-            payload (dict): The data to post as JSON.
+            payload (dict or str): The data to post as JSON dict or JSON string.
             query_params (dict, optional): Additional query parameters. Defaults to None.
 
         Returns:
@@ -2028,9 +2025,10 @@ class FolioClient:
         """
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
+        payload = prepare_payload(payload)
         req = await self.async_httpx_client.post(
             path,
-            json=payload,
+            data=payload,
             params=query_params,
         )
         req.raise_for_status()
@@ -2424,8 +2422,31 @@ def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_lo
     )
 
 
-def validate_uuid(my_uuid) -> bool:
+def validate_uuid(my_uuid: str) -> bool:
     """Validates that a string is a valid UUID"""
     reg = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"  # noqa
     pattern = re.compile(reg)
     return bool(pattern.match(my_uuid))
+
+
+def prepare_payload(payload: Dict | str) -> bytes:
+    """Prepares a payload for sending to FOLIO by converting it to JSON bytes.
+
+    Uses orjson for faster encoding if available, otherwise falls back to
+    the standard json library.
+
+    Args:
+        payload (dict or str): The payload to prepare.
+
+    Returns:
+        bytes: The JSON-encoded payload as bytes.
+    """
+    if isinstance(payload, dict):
+        if _HAS_ORJSON:
+            return orjson.dumps(payload)
+        else:
+            return json.dumps(payload).encode("utf-8")
+    elif isinstance(payload, str):
+        return payload.encode("utf-8")
+    else:
+        raise TypeError("Payload must be a dictionary or a string.")
