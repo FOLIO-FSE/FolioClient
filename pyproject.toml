@@ -1,6 +1,6 @@
 [project]
 name = "folioclient"
-version = "1.0.3"
+version = "1.0.4"
 description = "An API wrapper over the FOLIO LSP API Suite (Formerly OKAPI)."
 authors = [
     { name = "Theodor Tolstoy", email = "github.teddes@tolstoy.se" },
