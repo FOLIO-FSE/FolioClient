@@ -69,7 +69,7 @@ class FolioAuth(httpx.Auth):
     @tenant_id.setter
     def tenant_id(self, value: str):
         if value != self._tenant_id:
-            logger.debug("Setting tenant_id to %s", value)
+            logger.debug("Switching tenant_id from %s to %s", self._tenant_id, value)
             self._tenant_id = value
 
     def reset_tenant_id(self):
