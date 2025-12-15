@@ -2452,4 +2452,4 @@ def prepare_payload(payload: Dict | str) -> bytes:
     elif isinstance(payload, str):
         return payload.encode("utf-8")
     else:
-        raise TypeError("Payload must be a dictionary or a string.")
+        raise TypeError(f"Payload must be a dictionary or a string, got {type(payload).__name__}")
