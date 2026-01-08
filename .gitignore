@@ -113,7 +113,7 @@ poetry.lock
 pylock.toml
 
 # Sandbox files
-scratch_pad.ipynb
+scratch_pad.*
 
 # System files
 .DS_Store
