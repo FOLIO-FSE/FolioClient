@@ -26,6 +26,7 @@ from folioclient.exceptions import (
     FolioPermissionError,
     FolioResourceNotFoundError,
     FolioValidationError,
+    FolioClientClosed,
 )
 
 
@@ -450,6 +451,22 @@ class TestECSFunctionality:
                 for member in members:
                     assert isinstance(member, dict)
                     assert "id" in member
+
+    def test_context_manager_logout_after_tenant_switch(self, folio_client_ecs):
+        """Verify __exit__ logs out cleanly after switching to a member tenant."""
+        members = folio_client_ecs.ecs_members
+        if not members:
+            pytest.skip("No ECS member tenants available for logout test")
+
+        member_tenant = members[0]["id"]
+
+        with folio_client_ecs as client:
+            client.tenant_id = member_tenant
+            assert client.tenant_id == member_tenant
+
+        assert client.is_closed is True
+        with pytest.raises(FolioClientClosed):
+            _ = client.cookies
 
     @pytest.mark.skip(reason="ECS functionality not available in snapshot environment")
     def test_ecs_central_tenant_id_setter(self, folio_client):

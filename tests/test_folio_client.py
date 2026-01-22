@@ -2,6 +2,7 @@ import json
 import pytest
 from httpx import HTTPError, UnsupportedProtocol
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
+from urllib.parse import urljoin
 import httpx
 
 # Import shared test utilities
@@ -278,6 +279,28 @@ def test_context_manager_closes_client():
                 assert fc.is_closed is False
             # After exiting the context, it should be closed
             assert fc.is_closed is True
+
+
+@patch.object(FolioClient, '_initial_ecs_check')
+def test_context_manager_logs_out_on_exit(mock_ecs_check):
+    with folio_auth_patcher():
+        mock_logout_response = Mock()
+        mock_logout_response.raise_for_status.return_value = None
+
+        mock_httpx_client = Mock()
+        mock_httpx_client.is_closed = False
+        mock_httpx_client.post.return_value = mock_logout_response
+        mock_httpx_client.close = Mock()
+
+        logout_url = urljoin("https://example.com", "authn/logout")
+
+        with patch.object(FolioClient, 'get_folio_http_client', return_value=mock_httpx_client):
+            with FolioClient("https://example.com", "tenant", "user", "pass") as fc:
+                fc.folio_auth.reset_tenant_id = Mock()
+
+            mock_httpx_client.post.assert_called_once_with(logout_url)
+            mock_httpx_client.close.assert_called_once()
+            fc.folio_auth.reset_tenant_id.assert_called_once()
 
 
 @pytest.mark.asyncio
