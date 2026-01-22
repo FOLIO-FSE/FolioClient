@@ -331,6 +331,7 @@ class FolioClient:
             and not self.httpx_client.is_closed
         ):
             logger.info("logging out...")
+            self.folio_auth.reset_tenant_id()
             logout = self.httpx_client.post(
                 urljoin(self.gateway_url, "authn/logout"),
             )
