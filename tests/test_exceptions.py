@@ -42,6 +42,7 @@ from folioclient.exceptions import (
     folio_errors,
     _create_folio_exception,
     _get_error_detail,
+    _get_connection_error_message,
 )
 
 
@@ -193,6 +194,29 @@ class TestErrorDetailExtraction:
         assert result.endswith("...")
 
 
+class TestConnectionErrorMessage:
+    """Test connection error message fallback logic."""
+
+    def test_returns_message_when_present(self):
+        request = Mock(spec=httpx.Request)
+        error = httpx.ReadError("Connection reset by peer", request=request)
+        assert _get_connection_error_message(error) == "Connection reset by peer"
+
+    def test_falls_back_to_class_and_url_when_empty(self):
+        request = Mock(spec=httpx.Request)
+        request.url = httpx.URL("https://folio.example.com/users")
+        error = httpx.ReadError("", request=request)
+        result = _get_connection_error_message(error)
+        assert result == "ReadError on https://folio.example.com/users"
+
+    def test_falls_back_to_class_and_url_when_whitespace(self):
+        request = Mock(spec=httpx.Request)
+        request.url = httpx.URL("https://folio.example.com/items")
+        error = httpx.WriteError("   ", request=request)
+        result = _get_connection_error_message(error)
+        assert result == "WriteError on https://folio.example.com/items"
+
+
 class TestCreateFolioException:
     """Test exception creation from httpx errors."""
     
@@ -224,7 +248,80 @@ class TestCreateFolioException:
         original_error = CustomRequestError("Unknown error", request=self.request)
         folio_error = _create_folio_exception(original_error)
         assert isinstance(folio_error, FolioConnectionError)
-        assert "Connection error" in str(folio_error)
+        assert "Unknown error" in str(folio_error)
+
+    def test_create_read_timeout_maps_to_folio_timeout(self):
+        """httpx.ReadTimeout is a subclass of TimeoutException and should map to FolioTimeoutError."""
+        original_error = httpx.ReadTimeout("Read timed out", request=self.request)
+        folio_error = _create_folio_exception(original_error)
+        assert isinstance(folio_error, FolioTimeoutError)
+        assert "Read timed out" in str(folio_error)
+
+    def test_create_connect_timeout_maps_to_folio_timeout(self):
+        """httpx.ConnectTimeout is a subclass of both ConnectError and TimeoutException."""
+        original_error = httpx.ConnectTimeout("Connect timed out", request=self.request)
+        folio_error = _create_folio_exception(original_error)
+        # ConnectTimeout is a subclass of ConnectError, which maps to FolioSystemUnavailableError
+        assert isinstance(folio_error, (FolioSystemUnavailableError, FolioTimeoutError))
+
+    def test_create_pool_timeout_maps_to_folio_timeout(self):
+        """httpx.PoolTimeout is a subclass of TimeoutException and should map to FolioTimeoutError."""
+        original_error = httpx.PoolTimeout("Pool timed out", request=self.request)
+        folio_error = _create_folio_exception(original_error)
+        assert isinstance(folio_error, FolioTimeoutError)
+        assert "Pool timed out" in str(folio_error)
+
+    def test_create_read_error_maps_to_folio_network_error(self):
+        """httpx.ReadError is a subclass of NetworkError and should map to FolioNetworkError."""
+        original_error = httpx.ReadError("Read failed", request=self.request)
+        folio_error = _create_folio_exception(original_error)
+        assert isinstance(folio_error, FolioNetworkError)
+        assert "Read failed" in str(folio_error)
+
+    def test_create_write_error_maps_to_folio_network_error(self):
+        """httpx.WriteError is a subclass of NetworkError and should map to FolioNetworkError."""
+        original_error = httpx.WriteError("Write failed", request=self.request)
+        folio_error = _create_folio_exception(original_error)
+        assert isinstance(folio_error, FolioNetworkError)
+        assert "Write failed" in str(folio_error)
+
+    def test_create_local_protocol_error_maps_to_generic_connection(self):
+        """httpx.LocalProtocolError is not a subclass of RemoteProtocolError or NetworkError,
+        so it correctly falls back to generic FolioConnectionError."""
+        original_error = httpx.LocalProtocolError("Local protocol issue", request=self.request)
+        folio_error = _create_folio_exception(original_error)
+        assert isinstance(folio_error, FolioConnectionError)
+        assert "Local protocol issue" in str(folio_error)
+
+    def test_create_empty_message_network_error(self):
+        """httpx subclasses with empty messages get a meaningful fallback."""
+        self.request.url = httpx.URL("https://folio.example.com/users")
+        original_error = httpx.ReadError("", request=self.request)
+        folio_error = _create_folio_exception(original_error)
+        assert isinstance(folio_error, FolioNetworkError)
+        assert "ReadError" in folio_error.message
+        assert "folio.example.com" in folio_error.message
+
+    def test_create_empty_message_timeout_error(self):
+        """httpx timeout with empty message gets a meaningful fallback."""
+        self.request.url = httpx.URL("https://folio.example.com/inventory")
+        original_error = httpx.ReadTimeout("", request=self.request)
+        folio_error = _create_folio_exception(original_error)
+        assert isinstance(folio_error, FolioTimeoutError)
+        assert "ReadTimeout" in folio_error.message
+        assert "folio.example.com" in folio_error.message
+
+    def test_create_empty_message_fallback_connection_error(self):
+        """Unknown connection errors with empty messages also get a meaningful fallback."""
+        class CustomRequestError(httpx.RequestError):
+            pass
+
+        self.request.url = httpx.URL("https://folio.example.com/test")
+        original_error = CustomRequestError("", request=self.request)
+        folio_error = _create_folio_exception(original_error)
+        assert isinstance(folio_error, FolioConnectionError)
+        assert "CustomRequestError" in folio_error.message
+        assert "folio.example.com" in folio_error.message
     
     def test_create_http_status_error_401(self):
         self.response.status_code = 401
@@ -360,6 +457,34 @@ class TestFolioErrorsDecorator:
         
         assert exc_info.value.request == request
         assert exc_info.value.__cause__.__class__ == httpx.TimeoutException
+
+    def test_sync_function_httpx_subclass_timeout(self):
+        """Decorator correctly maps httpx timeout subclasses through the decorator."""
+        request = Mock(spec=httpx.Request)
+
+        @folio_errors
+        def test_function():
+            raise httpx.ReadTimeout("Read timed out", request=request)
+
+        with pytest.raises(FolioTimeoutError) as exc_info:
+            test_function()
+
+        assert exc_info.value.request == request
+        assert exc_info.value.__cause__.__class__ == httpx.ReadTimeout
+
+    def test_sync_function_httpx_subclass_network(self):
+        """Decorator correctly maps httpx network subclasses through the decorator."""
+        request = Mock(spec=httpx.Request)
+
+        @folio_errors
+        def test_function():
+            raise httpx.ReadError("Connection reset", request=request)
+
+        with pytest.raises(FolioNetworkError) as exc_info:
+            test_function()
+
+        assert exc_info.value.request == request
+        assert exc_info.value.__cause__.__class__ == httpx.ReadError
     
     @pytest.mark.asyncio
     async def test_async_function_preserves_other_exceptions(self):

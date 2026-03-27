@@ -27,7 +27,6 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
-
 # Base FOLIO exceptions
 class FolioError(Exception):
     """Base exception for all FOLIO-related errors."""
@@ -384,6 +383,18 @@ def _get_error_detail(response: Optional[httpx.Response]) -> str:
         return "Unable to read error details from response"
 
 
+def _get_connection_error_message(
+    original_error: httpx.RequestError,
+) -> str:
+    """Build a meaningful message for connection errors, falling back to class name + URL."""
+    message = str(original_error).strip()
+    if message:
+        return message
+    error_type = type(original_error).__name__
+    url = str(original_error.request.url) if original_error.request else "unknown URL"
+    return f"{error_type} on {url}"
+
+
 def _create_folio_exception(
     original_error: Union[httpx.RequestError, httpx.HTTPStatusError],
 ) -> FolioError:
@@ -392,15 +403,14 @@ def _create_folio_exception(
     # Handle connection errors (no response)
     if not hasattr(original_error, "response") or original_error.response is None:
         req_err = cast(httpx.RequestError, original_error)
-        error_type = type(req_err) # silence type checker
-        if error_type in _CONNECTION_EXCEPTIONS:
-            exception_class = _CONNECTION_EXCEPTIONS[error_type]
-            return exception_class(str(original_error), request=original_error.request)
-        else:
-            # Fallback for unknown connection errors
-            return FolioConnectionError(
-                f"Connection error: {original_error}", request=original_error.request
-            )
+        error_type = type(req_err)
+        message = _get_connection_error_message(req_err)
+        # Use issubclass to match httpx exception subclasses (e.g. ReadTimeout -> TimeoutException)
+        for httpx_base, folio_class in _CONNECTION_EXCEPTIONS.items():
+            if issubclass(error_type, httpx_base):
+                return folio_class(message, request=original_error.request)
+        # Fallback for unknown connection errors
+        return FolioConnectionError(message, request=original_error.request)
 
     # Handle HTTP status errors (have response)
     if isinstance(original_error, httpx.HTTPStatusError):
@@ -439,13 +449,13 @@ def _create_folio_exception(
 
 
 @overload
-def folio_errors(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
-    ...  # pragma: no cover
+def folio_errors(
+    func: Callable[P, Awaitable[T]],
+) -> Callable[P, Awaitable[T]]: ...  # pragma: no cover
 
 
 @overload
-def folio_errors(func: Callable[P, T]) -> Callable[P, T]:
-    ...  # pragma: no cover
+def folio_errors(func: Callable[P, T]) -> Callable[P, T]: ...  # pragma: no cover
 
 
 def folio_errors(func: Callable[P, Any]) -> Callable[P, Any]:
