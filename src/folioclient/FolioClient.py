@@ -2158,7 +2158,19 @@ class FolioClient:
 
     def get_instance_json_schema(self) -> Dict[str, Any]:
         """Fetches the JSON Schema for instances"""
-        return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/instance.json")
+        try:
+            return self.get_from_github(
+                "folio-org", "mod-inventory-storage", "/ramls/instance.json"
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return self.get_from_github(
+                    "folio-org",
+                    "mod-inventory-storage",
+                    "/ramls/schemas/instance-storage/instance.json",
+                )
+            else:
+                raise
 
     def get_holdings_schema(self) -> Dict[str, Any]:
         """Fetches the JSON Schema for holdings"""
@@ -2167,18 +2179,38 @@ class FolioClient:
                 "folio-org", "mod-inventory-storage", "/ramls/holdingsrecord.json"
             )
         except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+        try:
+            return self.get_from_github(
+                "folio-org",
+                "mod-inventory-storage",
+                "/ramls/holdings-storage/holdingsRecord.json",
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+        return self.get_from_github(
+            "folio-org",
+            "mod-inventory-storage",
+            "/ramls/schemas/holdings-storage/holdingsRecord.json",
+        )
+
+    def get_item_schema(self) -> Dict[str, Any]:
+        """Fetches the JSON Schema for items"""
+        try:
+            return self.get_from_github(
+                "folio-org", "mod-inventory-storage", "/ramls/item.json"
+            )
+        except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 return self.get_from_github(
                     "folio-org",
                     "mod-inventory-storage",
-                    "/ramls/holdings-storage/holdingsRecord.json",
+                    "/ramls/schemas/item-storage/item.json",
                 )
             else:
                 raise
-
-    def get_item_schema(self) -> Dict[str, Any]:
-        """Fetches the JSON Schema for holdings"""
-        return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/item.json")
 
     @staticmethod
     def get_github_request_headers() -> Dict[str, str]:
@@ -2312,8 +2344,10 @@ class FolioClient:
             follow_redirects=True,
         )
         schema_response.raise_for_status()
-        fix_refs = schema_response.text.replace("../raml-util", RAML_UTIL_URL).replace(
-            "raml-util", RAML_UTIL_URL
+        fix_refs = (
+            schema_response.text.replace("../../raml-util", RAML_UTIL_URL)
+            .replace("../raml-util", RAML_UTIL_URL)
+            .replace("raml-util", RAML_UTIL_URL)
         )
         if schema_url.endswith("yaml"):
             return to_json_schema(yaml.safe_load(fix_refs))
