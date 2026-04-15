@@ -1039,3 +1039,297 @@ class TestPostPutPayloadTypes:
                 call_args = mock_client.put.call_args
                 assert isinstance(call_args[1]["data"], bytes)
                 assert call_args[1]["data"] == payload.encode("utf-8")
+
+
+# --- Schema fallback tests for mod-inventory-storage v30+ path changes ---
+
+
+# Live GitHub tests: verify schema methods work against real mod-inventory-storage tags
+class TestInventoryStorageSchemaLive:
+    """Live tests that call get_instance_json_schema, get_holdings_schema, and
+    get_item_schema against actual mod-inventory-storage releases on GitHub."""
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_get_instance_json_schema_pre_v30(self, mock_ecs_check):
+        """get_instance_json_schema succeeds with a pre-v30 module version."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            fc.__dict__["module_versions"] = ["mod-inventory-storage-29.0.6"]
+            schema = fc.get_instance_json_schema()
+            assert schema is not None
+            assert "properties" in schema
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_get_instance_json_schema_v30(self, mock_ecs_check):
+        """get_instance_json_schema succeeds with v30 module version (fallback path)."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            fc.__dict__["module_versions"] = ["mod-inventory-storage-30.0.0"]
+            schema = fc.get_instance_json_schema()
+            assert schema is not None
+            assert "properties" in schema
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_get_holdings_schema_pre_v30(self, mock_ecs_check):
+        """get_holdings_schema succeeds with a pre-v30 module version."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            fc.__dict__["module_versions"] = ["mod-inventory-storage-29.0.6"]
+            schema = fc.get_holdings_schema()
+            assert schema is not None
+            assert "properties" in schema
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_get_holdings_schema_v30(self, mock_ecs_check):
+        """get_holdings_schema succeeds with v30 module version (fallback path)."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            fc.__dict__["module_versions"] = ["mod-inventory-storage-30.0.0"]
+            schema = fc.get_holdings_schema()
+            assert schema is not None
+            assert "properties" in schema
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_get_item_schema_pre_v30(self, mock_ecs_check):
+        """get_item_schema succeeds with a pre-v30 module version."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            fc.__dict__["module_versions"] = ["mod-inventory-storage-29.0.6"]
+            schema = fc.get_item_schema()
+            assert schema is not None
+            assert "properties" in schema
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_get_item_schema_v30(self, mock_ecs_check):
+        """get_item_schema succeeds with v30 module version (fallback path)."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            fc.__dict__["module_versions"] = ["mod-inventory-storage-30.0.0"]
+            schema = fc.get_item_schema()
+            assert schema is not None
+            assert "properties" in schema
+
+
+class TestGetInstanceJsonSchema:
+    """Tests for get_instance_json_schema with 404 fallback to new path."""
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_returns_schema_from_legacy_path(self, mock_ecs_check):
+        """Primary path succeeds — no fallback needed."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            schema = {"properties": {"id": {"type": "string"}}}
+
+            with patch.object(fc, 'get_from_github', return_value=schema) as mock_get:
+                result = fc.get_instance_json_schema()
+                assert result == schema
+                mock_get.assert_called_once_with(
+                    "folio-org", "mod-inventory-storage", "/ramls/instance.json"
+                )
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_falls_back_to_new_path_on_404(self, mock_ecs_check):
+        """Legacy path returns 404 — should fall back to v30 path."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            schema = {"properties": {"id": {"type": "string"}}}
+
+            mock_404 = Mock()
+            mock_404.status_code = 404
+            error_404 = httpx.HTTPStatusError(
+                "404 Not Found", request=Mock(), response=mock_404
+            )
+
+            with patch.object(
+                fc, 'get_from_github', side_effect=[error_404, schema]
+            ) as mock_get:
+                result = fc.get_instance_json_schema()
+                assert result == schema
+                assert mock_get.call_count == 2
+                mock_get.assert_called_with(
+                    "folio-org",
+                    "mod-inventory-storage",
+                    "/ramls/schemas/instance-storage/instance.json",
+                )
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_raises_non_404_errors(self, mock_ecs_check):
+        """Non-404 HTTP errors should propagate immediately."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+
+            mock_500 = Mock()
+            mock_500.status_code = 500
+            error_500 = httpx.HTTPStatusError(
+                "500 Server Error", request=Mock(), response=mock_500
+            )
+
+            with patch.object(fc, 'get_from_github', side_effect=error_500):
+                with pytest.raises(httpx.HTTPStatusError):
+                    fc.get_instance_json_schema()
+
+
+class TestGetHoldingsSchema:
+    """Tests for get_holdings_schema with three-level 404 fallback."""
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_returns_schema_from_first_path(self, mock_ecs_check):
+        """First (legacy) path succeeds."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            schema = {"properties": {"id": {"type": "string"}}}
+
+            with patch.object(fc, 'get_from_github', return_value=schema) as mock_get:
+                result = fc.get_holdings_schema()
+                assert result == schema
+                mock_get.assert_called_once_with(
+                    "folio-org", "mod-inventory-storage", "/ramls/holdingsrecord.json"
+                )
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_falls_back_to_second_path_on_404(self, mock_ecs_check):
+        """First path 404s — should try second (pre-v30 alternate) path."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            schema = {"properties": {"id": {"type": "string"}}}
+
+            mock_404 = Mock()
+            mock_404.status_code = 404
+            error_404 = httpx.HTTPStatusError(
+                "404 Not Found", request=Mock(), response=mock_404
+            )
+
+            with patch.object(
+                fc, 'get_from_github', side_effect=[error_404, schema]
+            ) as mock_get:
+                result = fc.get_holdings_schema()
+                assert result == schema
+                assert mock_get.call_count == 2
+                mock_get.assert_called_with(
+                    "folio-org",
+                    "mod-inventory-storage",
+                    "/ramls/holdings-storage/holdingsRecord.json",
+                )
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_falls_back_to_third_path_on_double_404(self, mock_ecs_check):
+        """First two paths 404 — should try third (v30) path."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            schema = {"properties": {"id": {"type": "string"}}}
+
+            mock_404 = Mock()
+            mock_404.status_code = 404
+            error_404 = httpx.HTTPStatusError(
+                "404 Not Found", request=Mock(), response=mock_404
+            )
+
+            with patch.object(
+                fc, 'get_from_github', side_effect=[error_404, error_404, schema]
+            ) as mock_get:
+                result = fc.get_holdings_schema()
+                assert result == schema
+                assert mock_get.call_count == 3
+                mock_get.assert_called_with(
+                    "folio-org",
+                    "mod-inventory-storage",
+                    "/ramls/schemas/holdings-storage/holdingsRecord.json",
+                )
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_raises_non_404_from_first_path(self, mock_ecs_check):
+        """Non-404 on first path should propagate."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+
+            mock_500 = Mock()
+            mock_500.status_code = 500
+            error_500 = httpx.HTTPStatusError(
+                "500 Server Error", request=Mock(), response=mock_500
+            )
+
+            with patch.object(fc, 'get_from_github', side_effect=error_500):
+                with pytest.raises(httpx.HTTPStatusError):
+                    fc.get_holdings_schema()
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_raises_non_404_from_second_path(self, mock_ecs_check):
+        """404 on first path, non-404 on second path should propagate."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+
+            mock_404 = Mock()
+            mock_404.status_code = 404
+            error_404 = httpx.HTTPStatusError(
+                "404 Not Found", request=Mock(), response=mock_404
+            )
+            mock_500 = Mock()
+            mock_500.status_code = 500
+            error_500 = httpx.HTTPStatusError(
+                "500 Server Error", request=Mock(), response=mock_500
+            )
+
+            with patch.object(
+                fc, 'get_from_github', side_effect=[error_404, error_500]
+            ):
+                with pytest.raises(httpx.HTTPStatusError):
+                    fc.get_holdings_schema()
+
+
+class TestGetItemSchema:
+    """Tests for get_item_schema with 404 fallback to new path."""
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_returns_schema_from_legacy_path(self, mock_ecs_check):
+        """Primary path succeeds — no fallback needed."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            schema = {"properties": {"id": {"type": "string"}}}
+
+            with patch.object(fc, 'get_from_github', return_value=schema) as mock_get:
+                result = fc.get_item_schema()
+                assert result == schema
+                mock_get.assert_called_once_with(
+                    "folio-org", "mod-inventory-storage", "/ramls/item.json"
+                )
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_falls_back_to_new_path_on_404(self, mock_ecs_check):
+        """Legacy path returns 404 — should fall back to v30 path."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            schema = {"properties": {"id": {"type": "string"}}}
+
+            mock_404 = Mock()
+            mock_404.status_code = 404
+            error_404 = httpx.HTTPStatusError(
+                "404 Not Found", request=Mock(), response=mock_404
+            )
+
+            with patch.object(
+                fc, 'get_from_github', side_effect=[error_404, schema]
+            ) as mock_get:
+                result = fc.get_item_schema()
+                assert result == schema
+                assert mock_get.call_count == 2
+                mock_get.assert_called_with(
+                    "folio-org",
+                    "mod-inventory-storage",
+                    "/ramls/schemas/item-storage/item.json",
+                )
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_raises_non_404_errors(self, mock_ecs_check):
+        """Non-404 HTTP errors should propagate immediately."""
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+
+            mock_500 = Mock()
+            mock_500.status_code = 500
+            error_500 = httpx.HTTPStatusError(
+                "500 Server Error", request=Mock(), response=mock_500
+            )
+
+            with patch.object(fc, 'get_from_github', side_effect=error_500):
+                with pytest.raises(httpx.HTTPStatusError):
+                    fc.get_item_schema()
