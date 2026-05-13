@@ -424,3 +424,98 @@ def test_folio_refresh_token_refreshes_when_expired(monkeypatch):
         now = datetime.now(tz=timezone.utc)
         fa._token = FolioAuth._Token(auth_token="expired", refresh_token="old", expires_at=now - timedelta(seconds=10), refresh_token_expires_at=None, cookies=None)
         assert fa.folio_refresh_token == "newr"
+
+
+def test_sync_auth_flow_403_retry_success(monkeypatch):
+    """403 Forbidden on first attempt should retry, and succeed if retry returns 200."""
+    params = make_params()
+    auth_cookies = {"folioAccessToken": "auth-t", "folioRefreshToken": "auth-r"}
+    auth_resp = DummyResponse(cookies=auth_cookies, json_data={})
+
+    def fake_client(*args, **kwargs):
+        return DummyClient(auth_resp)
+
+    with httpx_client_patcher(fake_client):
+        fa = FolioAuth(params)
+        req = httpx.Request("GET", "https//folio/resource")
+        gen = fa.sync_auth_flow(req)
+        next(gen)
+        # First response is 403 — triggers retry
+        yielded = gen.send(DummyResponse(status_code=403))
+        assert yielded is req
+        # Retry succeeds with 200
+        with pytest.raises(StopIteration):
+            gen.send(DummyResponse(status_code=200))
+
+
+def test_sync_auth_flow_403_retry_still_forbidden(monkeypatch):
+    """403 on both attempts should raise HTTPStatusError."""
+    params = make_params()
+    auth_cookies = {"folioAccessToken": "auth-t", "folioRefreshToken": "auth-r"}
+    auth_resp = DummyResponse(cookies=auth_cookies, json_data={})
+
+    def fake_client(*args, **kwargs):
+        return DummyClient(auth_resp)
+
+    with httpx_client_patcher(fake_client):
+        fa = FolioAuth(params)
+        req = httpx.Request("GET", "https//folio/resource")
+        gen = fa.sync_auth_flow(req)
+        next(gen)
+        # First response is 403 — triggers retry
+        gen.send(DummyResponse(status_code=403))
+        # Retry also returns 403 — should raise
+        with pytest.raises(httpx.HTTPStatusError):
+            gen.send(DummyResponse(status_code=403))
+
+
+@pytest.mark.asyncio
+async def test_async_auth_flow_403_retry_success(monkeypatch):
+    """Async: 403 Forbidden on first attempt should retry, and succeed if retry returns 200."""
+    params = make_params()
+    auth_cookies = {"folioAccessToken": "auth-t", "folioRefreshToken": "auth-r"}
+    auth_resp = DummyResponse(cookies=auth_cookies, json_data={})
+
+    def fake_client(*args, **kwargs):
+        return DummyClient(auth_resp)
+
+    def fake_async_client(*args, **kwargs):
+        return DummyAsyncClient(auth_resp)
+
+    with httpx_client_patcher(fake_client, fake_async_client):
+        fa = FolioAuth(params)
+        req = httpx.Request("GET", "https//folio/async-resource")
+        agen = fa.async_auth_flow(req)
+        first = await agen.__anext__()
+        assert first is req
+        # First response is 403 — triggers retry
+        yielded = await agen.asend(DummyResponse(status_code=403))
+        assert yielded is req
+        # Retry succeeds with 200
+        with pytest.raises(StopAsyncIteration):
+            await agen.asend(DummyResponse(status_code=200))
+
+
+@pytest.mark.asyncio
+async def test_async_auth_flow_403_retry_still_forbidden(monkeypatch):
+    """Async: 403 on both attempts should raise HTTPStatusError."""
+    params = make_params()
+    auth_cookies = {"folioAccessToken": "auth-t", "folioRefreshToken": "auth-r"}
+    auth_resp = DummyResponse(cookies=auth_cookies, json_data={})
+
+    def fake_client(*args, **kwargs):
+        return DummyClient(auth_resp)
+
+    def fake_async_client(*args, **kwargs):
+        return DummyAsyncClient(auth_resp)
+
+    with httpx_client_patcher(fake_client, fake_async_client):
+        fa = FolioAuth(params)
+        req = httpx.Request("GET", "https//folio/async-resource")
+        agen = fa.async_auth_flow(req)
+        await agen.__anext__()
+        # First response is 403 — triggers retry
+        await agen.asend(DummyResponse(status_code=403))
+        # Retry also returns 403 — should raise
+        with pytest.raises(httpx.HTTPStatusError):
+            await agen.asend(DummyResponse(status_code=403))
