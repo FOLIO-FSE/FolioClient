@@ -112,6 +112,16 @@ class FolioAuth(httpx.Auth):
                     response=retry_response,
                 )
 
+        if response.status_code == HTTPStatus.FORBIDDEN:
+            logger.debug("Received unexpected 403 Forbidden. Will retry request once.")
+            retry_response = yield request
+            if retry_response.status_code == HTTPStatus.FORBIDDEN:
+                raise httpx.HTTPStatusError(
+                    "Received 403 Forbidden. Check if the user has the necessary permissions.",
+                    request=request,
+                    response=retry_response,
+                )
+
     async def async_auth_flow(
         self, request: httpx.Request
     ) -> "AsyncGenerator[httpx.Request, httpx.Response]":
@@ -145,6 +155,15 @@ class FolioAuth(httpx.Auth):
                 raise httpx.HTTPStatusError(
                     "Authentication failed after token refresh."
                     " Check credentials and authorization.",
+                    request=request,
+                    response=retry_response,
+                )
+        if response.status_code == HTTPStatus.FORBIDDEN:
+            logger.debug("Received unexpected 403 Forbidden. Will retry request once.")
+            retry_response = yield request
+            if retry_response.status_code == HTTPStatus.FORBIDDEN:
+                raise httpx.HTTPStatusError(
+                    "Received 403 Forbidden. Check if the user has the necessary permissions.",
                     request=request,
                     response=retry_response,
                 )
