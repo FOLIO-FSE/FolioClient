@@ -72,6 +72,9 @@ BUGFEST_CONFIG = {
     "password": os.environ.get("FOLIO_BUGFEST_PASSWORD", "folio"),
 }
 
+BUGFEST_NEXT_CONFIG = {
+    "gateway_url": "https://folio-etesting-sprint-kong.ci.folio.org",
+}
 
 # Pytest markers
 pytestmark = pytest.mark.integration
@@ -84,6 +87,7 @@ SERVER_CONFIGS = [
     ("eureka-ecs", SNAPSHOT_EUREKA_ECS_CONFIG),
     ("snapshot-2-eureka", {**SNAPSHOT_CONFIG, **SNAPSHOT_2_EUREKA_CONFIG}),
     ("bugfest", BUGFEST_CONFIG),
+    ("bugfest-next", {**BUGFEST_CONFIG, **BUGFEST_NEXT_CONFIG}),
 ]
 
 
@@ -516,10 +520,10 @@ class TestPerformanceAndLimits:
                 # Some endpoints might have limits - that's acceptable
                 pass
 
-    def test_concurrent_requests(self):
+    def test_concurrent_requests(self, server_config):
         """Test concurrent request handling."""
         async def make_requests():
-            async with FolioClient(**SNAPSHOT_CONFIG) as client:
+            async with FolioClient(**server_config) as client:
                 # Make multiple concurrent requests
                 tasks = [
                     client.folio_get_async("/users", query_params={"limit": 5}),
@@ -534,9 +538,9 @@ class TestPerformanceAndLimits:
 
         asyncio.run(make_requests())
 
-    def test_timeout_configuration(self):
+    def test_timeout_configuration(self, server_config):
         """Test custom timeout configuration."""
-        config_with_timeout = SNAPSHOT_CONFIG.copy()
+        config_with_timeout = server_config.copy()
         config_with_timeout["timeout"] = 30.0  # 30 second timeout
         
         with FolioClient(**config_with_timeout) as client:
