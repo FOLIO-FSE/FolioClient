@@ -5,7 +5,7 @@ import logging
 import os
 from functools import wraps
 from http import HTTPStatus
-from typing import Callable
+from typing import Awaitable, Callable, ParamSpec, TypeVar, overload
 
 import httpx
 from tenacity import (
@@ -18,6 +18,9 @@ from tenacity import (
 )
 
 from folioclient.exceptions import FolioClientClosed
+
+P = ParamSpec("P")
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +172,16 @@ def get_auth_retry_config() -> dict:
 
 
 # Modern retry decorators
+@overload
+def folio_retry_on_server_error(func: Callable[P, T]) -> Callable[P, T]: ...  # pragma: no cover
+
+
+@overload
+def folio_retry_on_server_error(
+    func: Callable[P, Awaitable[T]],
+) -> Callable[P, Awaitable[T]]: ...  # pragma: no cover
+
+
 def folio_retry_on_server_error(func: Callable) -> Callable:
     """
     Modern retry decorator for server errors using tenacity.
@@ -191,6 +204,16 @@ def folio_retry_on_server_error(func: Callable) -> Callable:
         SERVER_ERROR_RETRY_FACTOR: Legacy fallback (default: 3.0)
     """
     return retry(**get_server_retry_config())(func)
+
+
+@overload
+def folio_retry_on_auth_error(func: Callable[P, T]) -> Callable[P, T]: ...  # pragma: no cover
+
+
+@overload
+def folio_retry_on_auth_error(
+    func: Callable[P, Awaitable[T]],
+) -> Callable[P, Awaitable[T]]: ...  # pragma: no cover
 
 
 def folio_retry_on_auth_error(func: Callable) -> Callable:
@@ -218,6 +241,16 @@ def folio_retry_on_auth_error(func: Callable) -> Callable:
 
 
 # Combined decorator for convenience
+@overload
+def folio_retry_all_errors(func: Callable[P, T]) -> Callable[P, T]: ...  # pragma: no cover
+
+
+@overload
+def folio_retry_all_errors(
+    func: Callable[P, Awaitable[T]],
+) -> Callable[P, Awaitable[T]]: ...  # pragma: no cover
+
+
 def folio_retry_all_errors(func: Callable) -> Callable:
     """
     Convenience decorator that combines both server and auth error retries.
@@ -227,6 +260,16 @@ def folio_retry_all_errors(func: Callable) -> Callable:
     """
     # Apply auth retry first, then server retry
     return folio_retry_on_server_error(folio_retry_on_auth_error(func))
+
+
+@overload
+def handle_remote_protocol_error(func: Callable[P, T]) -> Callable[P, T]: ...  # pragma: no cover
+
+
+@overload
+def handle_remote_protocol_error(
+    func: Callable[P, Awaitable[T]],
+) -> Callable[P, Awaitable[T]]: ...  # pragma: no cover
 
 
 def handle_remote_protocol_error(func):
@@ -326,6 +369,16 @@ def use_client_session_with_generator(func):
         return async_wrapper
     else:
         return wrapper
+
+
+@overload
+def use_client_session(func: Callable[P, T]) -> Callable[P, T]: ...  # pragma: no cover
+
+
+@overload
+def use_client_session(
+    func: Callable[P, Awaitable[T]],
+) -> Callable[P, Awaitable[T]]: ...  # pragma: no cover
 
 
 def use_client_session(func):
