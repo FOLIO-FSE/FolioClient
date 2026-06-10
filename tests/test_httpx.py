@@ -29,6 +29,12 @@ class DummyResponse:
     def json(self):
         return self._json
 
+    def read(self):
+        return b""
+
+    async def aread(self):
+        return b""
+
     def raise_for_status(self):
         if not (200 <= self.status_code < 300):
             raise httpx.HTTPStatusError("status", request=None, response=self)
