@@ -116,6 +116,8 @@ class FolioAuth(httpx.Auth):
             logger.debug("Received unexpected 403 Forbidden. Will retry request once.")
             retry_response = yield request
             if retry_response.status_code == HTTPStatus.FORBIDDEN:
+                # Ensure response body is available to callers inspecting exception.response.text
+                retry_response.read()
                 retry_response.raise_for_status()  # Raise 403 if still forbidden after retry
 
     async def async_auth_flow(
@@ -159,6 +161,8 @@ class FolioAuth(httpx.Auth):
             logger.debug("Received unexpected 403 Forbidden. Will retry request once.")
             retry_response = yield request
             if retry_response.status_code == HTTPStatus.FORBIDDEN:
+                # Ensure response body is available to callers inspecting exception.response.text
+                await retry_response.aread()
                 retry_response.raise_for_status()  # Raise 403 if still forbidden after retry
 
     def _do_sync_auth(self) -> _Token:
