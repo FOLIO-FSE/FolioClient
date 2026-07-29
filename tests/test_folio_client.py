@@ -532,6 +532,26 @@ def test_current_user_fallbacks_and_failure(mock_ecs_check):
         assert fc3.current_user == ""
 
 
+@patch.object(FolioClient, '_initial_ecs_check')
+def test_service_points_cached_property(mock_ecs_check):
+    """Test service_points uses the expected endpoint and caches the result."""
+    with folio_auth_patcher() as mock_folio_auth:
+        mock_auth_instance = Mock()
+        mock_auth_instance.tenant_id = "t"
+        mock_folio_auth.return_value = mock_auth_instance
+
+        fc = FolioClient("https://example.com", "t", "user", "pass")
+        expected = [{"id": "sp-1", "name": "Main Desk"}]
+
+        with patch.object(fc, "folio_get_all", return_value=expected) as mock_get_all:
+            assert fc.service_points == expected
+            assert fc.service_points == expected
+
+            mock_get_all.assert_called_once_with(
+                "/service-points", "servicepoints", fc.cql_all, 1000
+            )
+
+
 def test_construct_timeout_merge_with_defaults(monkeypatch):
     """Test that _construct_timeout merges provided dict with TIMEOUT_CONFIG defaults."""
     # Temporarily set TIMEOUT_CONFIG in the FolioClient module
@@ -870,11 +890,11 @@ class TestPostPutPayloadTypes:
                 payload = {"name": "test", "value": 42}
                 result = fc.folio_post("/test", payload)
                 
-                # Verify the call was made with bytes data
+                # Verify the call was made with bytes content
                 mock_client.post.assert_called_once()
                 call_args = mock_client.post.call_args
                 assert call_args[0][0] == "test"
-                assert isinstance(call_args[1]["data"], bytes)
+                assert isinstance(call_args[1]["content"], bytes)
                 assert result == {"id": "123", "name": "test"}
 
     def test_folio_post_with_string_payload(self, mock_ecs_check):
@@ -903,11 +923,11 @@ class TestPostPutPayloadTypes:
                 payload = '{"name": "test", "value": 42}'
                 result = fc.folio_post("/test", payload)
                 
-                # Verify the call was made with bytes data
+                # Verify the call was made with bytes content
                 mock_client.post.assert_called_once()
                 call_args = mock_client.post.call_args
-                assert isinstance(call_args[1]["data"], bytes)
-                assert call_args[1]["data"] == payload.encode("utf-8")
+                assert isinstance(call_args[1]["content"], bytes)
+                assert call_args[1]["content"] == payload.encode("utf-8")
                 assert result == {"id": "456", "status": "created"}
 
     def test_folio_put_with_dict_payload(self, mock_ecs_check):
@@ -936,11 +956,11 @@ class TestPostPutPayloadTypes:
                 payload = {"id": "123", "name": "updated"}
                 result = fc.folio_put("/test/123", payload)
                 
-                # Verify the call was made with bytes data
+                # Verify the call was made with bytes content
                 mock_client.put.assert_called_once()
                 call_args = mock_client.put.call_args
                 assert call_args[0][0] == "test/123"
-                assert isinstance(call_args[1]["data"], bytes)
+                assert isinstance(call_args[1]["content"], bytes)
 
     def test_folio_put_with_string_payload(self, mock_ecs_check):
         """Test that folio_put works with JSON string payload."""
@@ -968,11 +988,11 @@ class TestPostPutPayloadTypes:
                 payload = '{"id": "123", "name": "updated"}'
                 result = fc.folio_put("/test/123", payload)
                 
-                # Verify the call was made with bytes data
+                # Verify the call was made with bytes content
                 mock_client.put.assert_called_once()
                 call_args = mock_client.put.call_args
-                assert isinstance(call_args[1]["data"], bytes)
-                assert call_args[1]["data"] == payload.encode("utf-8")
+                assert isinstance(call_args[1]["content"], bytes)
+                assert call_args[1]["content"] == payload.encode("utf-8")
 
     @pytest.mark.asyncio
     async def test_folio_post_async_with_dict_payload(self, mock_ecs_check):
@@ -1001,10 +1021,10 @@ class TestPostPutPayloadTypes:
                 payload = {"name": "async_test", "value": 100}
                 result = await fc.folio_post_async("/test", payload)
                 
-                # Verify the call was made with bytes data
+                # Verify the call was made with bytes content
                 mock_client.post.assert_called_once()
                 call_args = mock_client.post.call_args
-                assert isinstance(call_args[1]["data"], bytes)
+                assert isinstance(call_args[1]["content"], bytes)
                 assert result == {"id": "789", "async": True}
 
     @pytest.mark.asyncio
@@ -1034,11 +1054,11 @@ class TestPostPutPayloadTypes:
                 payload = '{"id": "999", "name": "async_updated"}'
                 result = await fc.folio_put_async("/test/999", payload)
                 
-                # Verify the call was made with bytes data
+                # Verify the call was made with bytes content
                 mock_client.put.assert_called_once()
                 call_args = mock_client.put.call_args
-                assert isinstance(call_args[1]["data"], bytes)
-                assert call_args[1]["data"] == payload.encode("utf-8")
+                assert isinstance(call_args[1]["content"], bytes)
+                assert call_args[1]["content"] == payload.encode("utf-8")
 
 
 # --- Schema fallback tests for mod-inventory-storage v30+ path changes ---
