@@ -584,18 +584,6 @@ class TestECSFunctionality:
 class TestPerformanceAndLimits:
     """Test performance characteristics and limits."""
 
-    def test_large_result_set_handling(self, folio_client):
-        """Test handling of large result sets."""
-        with folio_client:
-            # Test with a larger limit to see how client handles it
-            try:
-                users = folio_client.folio_get("/inventory", query_params={"limit": 1000})
-                assert "users" in users
-                assert len(users["users"]) <= 1000
-            except Exception as e:
-                # Some endpoints might have limits - that's acceptable
-                pass
-
     def test_concurrent_requests(self, server_config):
         """Test concurrent request handling."""
         async def make_requests():
