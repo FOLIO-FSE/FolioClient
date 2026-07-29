@@ -791,6 +791,15 @@ class FolioClient:
         return list(self.folio_get_all("/locations", "locations", self.cql_all, 1000))
 
     @cached_property
+    def service_points(self) -> List[Dict[str, Any]]:
+        """Returns a list of service points.
+
+        Returns:
+            List[Dict[str, Any]]: List of service point objects.
+        """
+        return list(self.folio_get_all("/service-points", "servicepoints", self.cql_all, 1000))
+
+    @cached_property
     def electronic_access_relationships(self) -> List[Dict[str, Any]]:
         """Returns a list of electronic access relationships.
 
@@ -1932,7 +1941,7 @@ class FolioClient:
         payload = prepare_payload(payload)
         req = self.httpx_client.put(
             path,
-            data=payload,
+            content=payload,
             params=query_params,
         )
         req.raise_for_status()
@@ -1960,7 +1969,7 @@ class FolioClient:
         payload = prepare_payload(payload)
         req = await self.async_httpx_client.put(
             path,
-            data=payload,
+            content=payload,
             params=query_params,
         )
         req.raise_for_status()
@@ -2000,7 +2009,7 @@ class FolioClient:
         payload = prepare_payload(payload)
         req = self.httpx_client.post(
             path,
-            data=payload,
+            content=payload,
             params=query_params,
         )
         req.raise_for_status()
@@ -2029,7 +2038,7 @@ class FolioClient:
         payload = prepare_payload(payload)
         req = await self.async_httpx_client.post(
             path,
-            data=payload,
+            content=payload,
             params=query_params,
         )
         req.raise_for_status()
@@ -2199,9 +2208,7 @@ class FolioClient:
     def get_item_schema(self) -> Dict[str, Any]:
         """Fetches the JSON Schema for items"""
         try:
-            return self.get_from_github(
-                "folio-org", "mod-inventory-storage", "/ramls/item.json"
-            )
+            return self.get_from_github("folio-org", "mod-inventory-storage", "/ramls/item.json")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 return self.get_from_github(
@@ -2448,13 +2455,11 @@ class FolioClient:
 
 def get_loan_policy_hash(item_type_id, loan_type_id, patron_type_id, shelving_location_id) -> str:
     """Generate a hash of the circulation rule parameters that key a loan policy"""
-    return str(
-        hashlib.sha224(
-            ("".join([item_type_id, loan_type_id, patron_type_id, shelving_location_id])).encode(
-                "utf-8"
-            )
-        ).hexdigest()
-    )
+    return hashlib.sha224(
+        ("".join([item_type_id, loan_type_id, patron_type_id, shelving_location_id])).encode(
+            "utf-8"
+        )
+    ).hexdigest()
 
 
 def validate_uuid(my_uuid: str) -> bool:

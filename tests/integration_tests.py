@@ -19,6 +19,7 @@ import asyncio
 from unittest.mock import patch
 import httpx
 import os
+from uuid import uuid4
 
 from folioclient import FolioClient
 from folioclient.exceptions import (
@@ -225,6 +226,66 @@ class TestUserManagement:
         assert "users" in users
         assert isinstance(users["users"], list)
 
+    def test_user_post_put_get_delete_lifecycle(self, folio_client):
+        """Test user create/update/get/delete lifecycle across environments."""
+        with folio_client:
+            user_id = str(uuid4())
+            initial_barcode = user_id
+            updated_barcode = str(uuid4())
+            username = f"integration_{user_id[:12]}"
+            created = False
+
+            try:
+                current_user = folio_client.folio_get(f"/users/{folio_client.current_user}")
+            except FolioPermissionError:
+                pytest.skip("Insufficient permissions to read current user for lifecycle test")
+
+            patron_group = current_user.get("patronGroup")
+            if not patron_group:
+                pytest.skip("Current user has no patronGroup; cannot create lifecycle test user")
+
+            personal_payload = {
+                "lastName": "IntegrationLifecycle",
+                "firstName": "Test",
+            }
+            if current_user.get("personal", {}).get("preferredContactTypeId"):
+                personal_payload["preferredContactTypeId"] = current_user["personal"][
+                    "preferredContactTypeId"
+                ]
+
+            create_payload = {
+                "id": user_id,
+                "username": username,
+                "active": True,
+                "patronGroup": patron_group,
+                "type": current_user.get("type", "patron"),
+                "barcode": initial_barcode,
+                "personal": personal_payload,
+            }
+
+            try:
+                folio_client.folio_post("/users", create_payload)
+                created = True
+
+                created_user = folio_client.folio_get(f"/users/{user_id}")
+                assert created_user["id"] == user_id
+                assert created_user.get("barcode") == initial_barcode
+
+                created_user["barcode"] = updated_barcode
+                folio_client.folio_put(f"/users/{user_id}", created_user)
+
+                updated_user = folio_client.folio_get(f"/users/{user_id}")
+                assert updated_user["id"] == user_id
+                assert updated_user.get("barcode") == updated_barcode
+            except FolioPermissionError:
+                pytest.skip("Insufficient permissions to create/update users for lifecycle test")
+            finally:
+                if created:
+                    folio_client.folio_delete(f"/users/{user_id}")
+
+                with pytest.raises(FolioResourceNotFoundError):
+                    folio_client.folio_get(f"/users/{user_id}")
+
 
 class TestInventoryManagement:
     """Test inventory-related functionality."""
@@ -376,6 +437,21 @@ class TestCachedProperties:
             types2 = folio_client.identifier_types
             assert types1 == types2
             assert isinstance(types1, list)
+
+    def test_service_points_cached_property(self, folio_client):
+        """Test service_points cached property consistency."""
+        with folio_client:
+            try:
+                service_points_1 = folio_client.service_points
+                service_points_2 = folio_client.service_points
+            except FolioPermissionError:
+                pytest.skip("Insufficient permissions to read service points")
+            except FolioResourceNotFoundError:
+                pytest.skip("Service points endpoint not available in this environment")
+
+            assert isinstance(service_points_1, list)
+            assert service_points_1 == service_points_2
+            assert service_points_1 is service_points_2
 
     def test_clear_cached_properties(self, folio_client):
         """Test clearing cached properties."""
