@@ -106,6 +106,8 @@ class FolioAuth(httpx.Auth):
 
             # If still unauthorized after fresh auth, something is seriously wrong
             if retry_response.status_code == HTTPStatus.UNAUTHORIZED:
+                # Ensure response body is available to callers inspecting exception.response.text
+                retry_response.read()
                 raise httpx.HTTPStatusError(
                     "Authentication failed after token refresh."
                     " Check credentials and authorization.",
@@ -113,7 +115,7 @@ class FolioAuth(httpx.Auth):
                     response=retry_response,
                 )
 
-        if response.status_code == HTTPStatus.FORBIDDEN:
+        elif response.status_code == HTTPStatus.FORBIDDEN:
             logger.debug("Received unexpected 403 Forbidden. Will retry request once.")
             retry_response = yield request
             if retry_response.status_code == HTTPStatus.FORBIDDEN:
@@ -151,6 +153,8 @@ class FolioAuth(httpx.Auth):
 
             # If still unauthorized after fresh auth, something is seriously wrong
             if retry_response.status_code == HTTPStatus.UNAUTHORIZED:
+                # Ensure response body is available to callers inspecting exception.response.text
+                await retry_response.aread()
                 raise httpx.HTTPStatusError(
                     "Authentication failed after token refresh."
                     " Check credentials and authorization.",
@@ -158,7 +162,7 @@ class FolioAuth(httpx.Auth):
                     response=retry_response,
                 )
 
-        if response.status_code == HTTPStatus.FORBIDDEN:
+        elif response.status_code == HTTPStatus.FORBIDDEN:
             logger.debug("Received unexpected 403 Forbidden. Will retry request once.")
             retry_response = yield request
             if retry_response.status_code == HTTPStatus.FORBIDDEN:
