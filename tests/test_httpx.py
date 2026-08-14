@@ -525,3 +525,50 @@ async def test_async_auth_flow_403_retry_still_forbidden(monkeypatch):
         # Retry also returns 403 — should raise
         with pytest.raises(httpx.HTTPStatusError):
             await agen.asend(DummyResponse(status_code=403))
+
+
+# --- Token expiration parsing ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2030-01-01T12:00:00.000Z",  # FOLIO's real format; fromisoformat < 3.11 rejects 'Z'
+        "2030-01-01T12:00:00Z",
+        "2030-01-01T12:00:00+00:00",
+        "2030-01-01T12:00:00+0000",  # offset written without a colon
+    ],
+)
+def test_parse_expiration_accepts_folio_formats(value):
+    """Every form FOLIO is known to emit must parse, and must come back tz-aware."""
+    parsed = FolioAuth._parse_expiration(value)
+    assert parsed is not None
+    assert parsed.tzinfo is not None, "naive result would make _token_is_expiring raise TypeError"
+
+
+def test_parse_expiration_coerces_naive_to_utc():
+    parsed = FolioAuth._parse_expiration("2030-01-01T12:00:00")
+    assert parsed is not None and parsed.utcoffset() == timedelta(0)
+
+
+@pytest.mark.parametrize("value", [None, "", "not-a-timestamp", "2030-13-45T99:99:99Z"])
+def test_parse_expiration_returns_none_for_unusable_values(value):
+    """Unparseable expirations must not raise -- that would break authentication."""
+    assert FolioAuth._parse_expiration(value) is None
+
+
+def test_expiring_check_tolerates_real_folio_timestamp(monkeypatch):
+    """End-to-end: a real FOLIO 'Z' timestamp parses and compares without raising."""
+    params = make_params()
+    resp = DummyResponse(
+        cookies={"folioAccessToken": "t", "folioRefreshToken": "r"},
+        json_data={
+            "accessTokenExpiration": "2030-01-01T12:00:00.000Z",
+            "refreshTokenExpiration": "2030-01-02T12:00:00.000Z",
+        },
+    )
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        assert fa._token.expires_at is not None
+        assert fa._token.refresh_token_expires_at is not None
+        assert fa._token_is_expiring() is False  # would raise TypeError if naive

@@ -6,6 +6,7 @@ import threading
 import httpx
 
 from dataclasses import dataclass
+from dateutil.parser import isoparse
 from http import HTTPStatus
 from typing import TYPE_CHECKING, NamedTuple, Optional
 
@@ -179,29 +180,7 @@ class FolioAuth(httpx.Auth):
             logger.debug("Authenticating synchronously with URL: %s", auth_url)
             response = client.post(auth_url, json=auth_data, headers=headers)
             response.raise_for_status()
-
-            token = response.cookies.get("folioAccessToken")
-            refresh_token = response.cookies.get("folioRefreshToken")
-            if not token:
-                raise ValueError("Authentication failed: No token received.")
-
-            expires_at = None
-            if "accessTokenExpiration" in response.json():
-                expires_at = datetime.fromisoformat(response.json()["accessTokenExpiration"])
-
-            refresh_token_expires_at = None
-            if "refreshTokenExpiration" in response.json():
-                refresh_token_expires_at = datetime.fromisoformat(
-                    response.json()["refreshTokenExpiration"]
-                )
-
-            return FolioAuth._Token(
-                auth_token=token,
-                refresh_token=refresh_token,
-                expires_at=expires_at,
-                refresh_token_expires_at=refresh_token_expires_at,
-                cookies=response.cookies,
-            )
+            return self._token_from_response(response)
 
     async def _do_async_auth(self) -> _Token:
         """Asynchronous authentication with the FOLIO system."""
@@ -219,29 +198,61 @@ class FolioAuth(httpx.Auth):
             logger.debug("Authenticating asynchronously with URL: %s", auth_url)
             response = await client.post(auth_url, json=auth_data, headers=headers)
             response.raise_for_status()
+            return self._token_from_response(response)
 
-            token = response.cookies.get("folioAccessToken")
-            refresh_token = response.cookies.get("folioRefreshToken")
-            if not token:
-                raise ValueError("Authentication failed: No token received.")
+    @classmethod
+    def _token_from_response(cls, response: httpx.Response) -> _Token:
+        """Build a _Token from an /authn/login-with-expiry response.
 
-            expires_at = None
-            if "accessTokenExpiration" in response.json():
-                expires_at = datetime.fromisoformat(response.json()["accessTokenExpiration"])
+        Shared by the sync and async auth methods so that the response parsing --
+        including the expiration handling in _parse_expiration -- exists in exactly
+        one place.
+        """
+        token = response.cookies.get("folioAccessToken")
+        if not token:
+            raise ValueError("Authentication failed: No token received.")
 
-            refresh_token_expires_at = None
-            if "refreshTokenExpiration" in response.json():
-                refresh_token_expires_at = datetime.fromisoformat(
-                    response.json()["refreshTokenExpiration"]
-                )
+        payload = response.json()
+        return cls._Token(
+            auth_token=token,
+            refresh_token=response.cookies.get("folioRefreshToken"),
+            expires_at=cls._parse_expiration(payload.get("accessTokenExpiration")),
+            refresh_token_expires_at=cls._parse_expiration(payload.get("refreshTokenExpiration")),
+            cookies=response.cookies,
+        )
 
-            return FolioAuth._Token(
-                auth_token=token,
-                refresh_token=refresh_token,
-                expires_at=expires_at,
-                refresh_token_expires_at=refresh_token_expires_at,
-                cookies=response.cookies,
+    @staticmethod
+    def _parse_expiration(value: Optional[str]) -> Optional[datetime]:
+        """Parse a FOLIO token expiration timestamp into an aware UTC datetime.
+
+        CARE POINT: this must not use datetime.fromisoformat. FOLIO emits ISO-8601 with
+        a trailing 'Z' (verified against live Okapi and Eureka instances, e.g.
+        '2026-08-07T18:13:36Z'), and fromisoformat cannot parse a 'Z' suffix before
+        Python 3.11. Since this package supports 3.10, fromisoformat raised ValueError
+        during authentication and made the client unusable there entirely. isoparse
+        handles 'Z' and offsets written without a colon on every supported version.
+
+        A value with no UTC offset is coerced to UTC so that comparisons in
+        _token_is_expiring never mix naive and aware datetimes (which would raise
+        TypeError on every request).
+
+        An unparseable value degrades to None rather than raising: losing the proactive
+        expiry check is far better than failing authentication outright.
+        """
+        if not value:
+            return None
+        try:
+            parsed = isoparse(value)
+        except (ValueError, OverflowError, TypeError):
+            logger.warning(
+                "Could not parse token expiration %r; proactive refresh disabled for"
+                " this token.",
+                value,
             )
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
 
     def _set_auth_cookies_on_request(self, request: httpx.Request) -> None:
         """Set authentication cookies on request, overriding any existing FOLIO auth cookies"""
