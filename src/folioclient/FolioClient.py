@@ -1306,7 +1306,10 @@ class FolioClient:
             FolioClientClosed: If the client has been closed.
         """
         self.validate_client_open()
-        with self.folio_auth._lock:
+        # Must use the async lock, not folio_auth._lock: a threading.RLock held across
+        # this await gives no mutual exclusion between coroutines (it is reentrant on
+        # the loop's own thread) and can let an older token overwrite a newer one.
+        async with self.folio_auth._get_async_lock():
             self.folio_auth._token = await self.folio_auth._do_async_auth()
 
     def logout(self) -> None:

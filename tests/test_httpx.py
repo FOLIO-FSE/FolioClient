@@ -648,3 +648,207 @@ def test_403_retry_body_is_read_before_raising(monkeypatch):
         with pytest.raises(httpx.HTTPStatusError):
             gen.send(final)
         assert final.read_called
+
+
+def make_token(auth_token="tok", expires_in=timedelta(hours=1)):
+    """Build a _Token that is not near expiry."""
+    return FolioAuth._Token(
+        auth_token=auth_token,
+        refresh_token=f"{auth_token}-r",
+        expires_at=datetime.now(tz=timezone.utc) + expires_in,
+        refresh_token_expires_at=None,
+        cookies=None,
+    )
+
+
+# --- Async lock registry ---------------------------------------------------------
+# These cover the parts of _get_async_lock that are easy to break by accident.
+
+
+@pytest.mark.asyncio
+async def test_concurrent_async_flows_authenticate_once(monkeypatch):
+    """The core guarantee: concurrent coroutines share one login.
+
+    A threading.RLock cannot do this -- it is reentrant on the event loop's thread,
+    so every coroutine acquires it and they all authenticate.
+    """
+    import asyncio
+
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t", "folioRefreshToken": "r"})
+
+    with httpx_client_patcher(
+        lambda *a, **k: DummyClient(resp), lambda *a, **k: DummyAsyncClient(resp)
+    ):
+        fa = FolioAuth(params)
+        fa._token = None  # force every flow to want a token
+        calls = []
+
+        async def slow_auth():
+            calls.append(1)
+            await asyncio.sleep(0.01)  # the network round trip
+            return make_token("shared")
+
+        fa._do_async_auth = slow_auth
+
+        async def one_request():
+            agen = fa.async_auth_flow(httpx.Request("GET", "https//folio/x"))
+            await agen.__anext__()
+            with pytest.raises(StopAsyncIteration):
+                await agen.asend(DummyResponse(status_code=200))
+
+        await asyncio.gather(*(one_request() for _ in range(10)))
+        assert calls == [1], f"expected 1 login for 10 concurrent flows, got {len(calls)}"
+
+
+@pytest.mark.asyncio
+async def test_async_lock_is_stable_within_one_loop(monkeypatch):
+    """Repeated calls on the same loop must return the identical lock object.
+
+    If this returns a fresh lock each time, mutual exclusion silently disappears.
+    """
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t"})
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        first = fa._get_async_lock()
+        assert all(fa._get_async_lock() is first for _ in range(5))
+
+
+def test_concurrent_event_loops_each_keep_their_own_lock(monkeypatch):
+    """Two live loops in two threads must not clobber each other's lock.
+
+    A single cached lock rebuilt on loop change thrashes here: each loop replaces the
+    other's lock, so coroutines within one loop end up holding different objects.
+    """
+    import asyncio
+    import threading
+
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t"})
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        seen = {}
+        seen_guard = threading.Lock()
+
+        async def worker(tag):
+            for _ in range(20):
+                obj = fa._get_async_lock()
+                with seen_guard:
+                    seen.setdefault(tag, set()).add(id(obj))
+                await asyncio.sleep(0.001)
+
+        async def main(tag):
+            await asyncio.gather(worker(tag), worker(tag))
+
+        threads = [
+            threading.Thread(target=lambda t=tag: asyncio.run(main(t)))
+            for tag in ("loopA", "loopB")
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert set(seen) == {"loopA", "loopB"}
+        for tag, ids in seen.items():
+            assert len(ids) == 1, f"{tag} saw {len(ids)} lock objects; exclusion is broken"
+        assert seen["loopA"] != seen["loopB"], "different loops must not share a lock"
+
+
+def test_async_lock_survives_sequential_event_loops(monkeypatch):
+    """A client reused across asyncio.run() calls must work under contention.
+
+    A single cached asyncio.Lock raises "is bound to a different event loop" here --
+    but only once there is contention, which is why this test forces two waiters.
+    """
+    import asyncio
+
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t"})
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+
+        async def contended():
+            async def hold():
+                async with fa._get_async_lock():
+                    await asyncio.sleep(0.01)
+
+            await asyncio.gather(hold(), hold())
+
+        asyncio.run(contended())
+        asyncio.run(contended())  # must not raise
+
+
+def test_async_lock_registry_does_not_leak(monkeypatch):
+    """Finished loops must drop out of the registry, or long-lived clients leak."""
+    import asyncio
+    import gc
+
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t"})
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+
+        async def touch():
+            fa._get_async_lock()
+
+        for _ in range(5):
+            asyncio.run(touch())
+        gc.collect()
+        assert len(fa._async_locks) == 0, "WeakKeyDictionary should release dead loops"
+
+
+def test_get_async_lock_requires_a_running_loop(monkeypatch):
+    """Documented precondition: it is an async-only helper."""
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t"})
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        with pytest.raises(RuntimeError):
+            fa._get_async_lock()
+
+
+def test_async_lock_guard_is_not_the_sync_lock(monkeypatch):
+    """The registry guard must be distinct from _lock, which is held across network I/O.
+
+    If they were the same lock, a sync login in another thread would stall the whole
+    event loop for the duration of that login (unbounded when timeout is None).
+    """
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t"})
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        assert fa._async_locks_guard is not fa._lock
+
+
+def test_event_loop_not_stalled_while_sync_login_holds_lock(monkeypatch):
+    """A thread holding _lock across a slow login must not block the event loop."""
+    import asyncio
+    import threading
+    import time
+
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t"})
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        released = threading.Event()
+
+        def hog():
+            with fa._lock:  # mimics sync_auth_flow / FolioClient.login
+                time.sleep(0.4)  # a slow /authn/login-with-expiry
+            released.set()
+
+        async def main():
+            t = threading.Thread(target=hog)
+            t.start()
+            time.sleep(0.05)  # let the thread take _lock first
+            start = time.perf_counter()
+            fa._get_async_lock()  # must not wait on _lock
+            elapsed = time.perf_counter() - start
+            t.join()
+            return elapsed
+
+        elapsed = asyncio.run(main())
+        assert released.is_set()
+        assert elapsed < 0.2, f"_get_async_lock blocked for {elapsed:.3f}s on the sync lock"
