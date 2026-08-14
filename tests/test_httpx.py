@@ -572,3 +572,79 @@ def test_expiring_check_tolerates_real_folio_timestamp(monkeypatch):
         assert fa._token.expires_at is not None
         assert fa._token.refresh_token_expires_at is not None
         assert fa._token_is_expiring() is False  # would raise TypeError if naive
+
+
+class ReadTrackingResponse(DummyResponse):
+    """DummyResponse that records whether the body was read before being raised.
+
+    httpx hands the auth flow an *unread* response and only calls response.read()
+    if the flow yields again; on an exception it calls response.close(). So the flow
+    must read the body itself before raising, or callers inspecting
+    exception.response.text get ResponseNotRead.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.read_called = False
+
+    def read(self):
+        self.read_called = True
+        return super().read()
+
+    async def aread(self):
+        self.read_called = True
+        return await super().aread()
+
+
+def test_401_retry_body_is_read_before_raising(monkeypatch):
+    """exception.response.text must be usable after auth fails post-refresh."""
+    params = make_params()
+    auth_resp = DummyResponse(cookies={"folioAccessToken": "t", "folioRefreshToken": "r"})
+
+    with httpx_client_patcher(lambda *a, **k: DummyClient(auth_resp)):
+        fa = FolioAuth(params)
+        gen = fa.sync_auth_flow(httpx.Request("GET", "https//folio/x"))
+        next(gen)
+        gen.send(DummyResponse(status_code=401))
+        final = ReadTrackingResponse(status_code=401)
+        with pytest.raises(httpx.HTTPStatusError):
+            gen.send(final)
+        assert final.read_called, "body must be read before raising, or .text is unavailable"
+
+
+@pytest.mark.asyncio
+async def test_async_401_retry_body_is_read_before_raising(monkeypatch):
+    params = make_params()
+    auth_resp = DummyResponse(cookies={"folioAccessToken": "t", "folioRefreshToken": "r"})
+
+    def fake_client(*args, **kwargs):
+        return DummyClient(auth_resp)
+
+    def fake_async_client(*args, **kwargs):
+        return DummyAsyncClient(auth_resp)
+
+    with httpx_client_patcher(fake_client, fake_async_client):
+        fa = FolioAuth(params)
+        agen = fa.async_auth_flow(httpx.Request("GET", "https//folio/x"))
+        await agen.__anext__()
+        await agen.asend(DummyResponse(status_code=401))
+        final = ReadTrackingResponse(status_code=401)
+        with pytest.raises(httpx.HTTPStatusError):
+            await agen.asend(final)
+        assert final.read_called
+
+
+def test_403_retry_body_is_read_before_raising(monkeypatch):
+    """Parity check: the 403 path already did this (b579e7b); keep it covered."""
+    params = make_params()
+    auth_resp = DummyResponse(cookies={"folioAccessToken": "t", "folioRefreshToken": "r"})
+
+    with httpx_client_patcher(lambda *a, **k: DummyClient(auth_resp)):
+        fa = FolioAuth(params)
+        gen = fa.sync_auth_flow(httpx.Request("GET", "https//folio/x"))
+        next(gen)
+        gen.send(DummyResponse(status_code=403))
+        final = ReadTrackingResponse(status_code=403)
+        with pytest.raises(httpx.HTTPStatusError):
+            gen.send(final)
+        assert final.read_called
