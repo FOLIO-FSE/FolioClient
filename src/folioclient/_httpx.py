@@ -165,11 +165,8 @@ class FolioAuth(httpx.Auth):
         self, request: httpx.Request
     ) -> "Generator[httpx.Request, httpx.Response, None]":
         """Synchronous authentication flow for httpx.Client"""
-        with self._lock:
-            if not self._token or self._token_is_expiring():
-                self._token = self._do_sync_auth()
-
-        self._set_auth_cookies_on_request(request)
+        token_used = self._ensure_sync_token()
+        self._set_auth_cookies_on_request(request, token_used)
 
         # Set tenant header if not already present (allows per-request override)
         if "x-okapi-tenant" not in request.headers:
@@ -178,15 +175,10 @@ class FolioAuth(httpx.Auth):
         response = yield request
 
         if response.status_code == HTTPStatus.UNAUTHORIZED:
-            logger.debug("Received 401 Unauthorized, refreshing token")
             with self._lock:
-                if self._token and not self._token_is_expiring():
-                    # Another thread refreshed the token while we were waiting for the lock
-                    pass
-                else:
-                    self._token = self._do_sync_auth()
+                token_used = self._reauthenticate_sync(token_used)
 
-            self._set_auth_cookies_on_request(request)
+            self._set_auth_cookies_on_request(request, token_used)
             retry_response = yield request
 
             # If still unauthorized after fresh auth, something is seriously wrong
@@ -212,11 +204,8 @@ class FolioAuth(httpx.Auth):
         self, request: httpx.Request
     ) -> "AsyncGenerator[httpx.Request, httpx.Response]":
         """Asynchronous authentication flow for httpx.AsyncClient"""
-        async with self._get_async_lock():
-            if not self._token or self._token_is_expiring():
-                self._token = await self._do_async_auth()
-
-        self._set_auth_cookies_on_request(request)
+        token_used = await self._ensure_async_token()
+        self._set_auth_cookies_on_request(request, token_used)
 
         # Set tenant header if not already present (allows per-request override)
         if "x-okapi-tenant" not in request.headers:
@@ -225,15 +214,10 @@ class FolioAuth(httpx.Auth):
         response = yield request
 
         if response.status_code == HTTPStatus.UNAUTHORIZED:
-            logger.debug("Received 401 Unauthorized, refreshing token")
             async with self._get_async_lock():
-                if self._token and not self._token_is_expiring():
-                    # Another coroutine refreshed the token while we awaited the lock
-                    pass
-                else:
-                    self._token = await self._do_async_auth()
+                token_used = await self._reauthenticate_async(token_used)
 
-            self._set_auth_cookies_on_request(request)
+            self._set_auth_cookies_on_request(request, token_used)
             retry_response = yield request
 
             # If still unauthorized after fresh auth, something is seriously wrong
@@ -342,8 +326,20 @@ class FolioAuth(httpx.Auth):
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed
 
-    def _set_auth_cookies_on_request(self, request: httpx.Request) -> None:
-        """Set authentication cookies on request, overriding any existing FOLIO auth cookies"""
+    def _set_auth_cookies_on_request(
+        self, request: httpx.Request, token: Optional[_Token] = None
+    ) -> None:
+        """Set authentication cookies on request, overriding any existing FOLIO auth cookies
+
+        Args:
+            request: The request to set cookies on.
+            token: The token whose cookies to apply. The auth flows pass the exact token
+                they validated, so that a concurrent refresh on another thread or loop
+                cannot substitute a different one between the check and this call.
+                Defaults to the current token.
+        """
+        if token is None:
+            token = self._token
         existing_cookie_header = request.headers.get("Cookie", "")
 
         # Parse existing cookies and filter out FOLIO auth cookies
@@ -351,8 +347,8 @@ class FolioAuth(httpx.Auth):
 
         # Add our authentication cookies
         auth_cookies = {}
-        if self._token and self._token.cookies:
-            for name, value in self._token.cookies.items():
+        if token and token.cookies:
+            for name, value in token.cookies.items():
                 auth_cookies[name] = value
 
         # Combine all cookies
@@ -379,25 +375,85 @@ class FolioAuth(httpx.Auth):
         return existing_cookies
 
     def _token_is_expiring(self) -> bool:
-        """Returns true if token is within 60 seconds of expiration"""
+        """Returns true if token is within 60 seconds of expiration.
+
+        This is a proactive optimization only: it saves a wasted round trip when the
+        token has already aged out, which is the common case in long-running jobs.
+
+        It is deliberately NOT the test used to decide whether to refresh after a 401.
+        The server rejecting a token is authoritative, and a token can be rejected
+        while still looking valid here -- clock skew, Keycloak key rotation, session
+        revocation, or a module with a stale JWKS cache. See _reauthenticate_sync.
+        """
         return (
             not self._token
             or not self._token.expires_at
             or (datetime.now(tz=timezone.utc) + timedelta(seconds=60)) >= self._token.expires_at
         )
 
+    def _require_token(self) -> _Token:
+        """Return the current token, failing loudly if there somehow is none."""
+        if not self._token:  # pragma: no cover - auth returns a token or raises
+            raise ValueError("Authentication failed: No token available.")
+        return self._token
+
+    def _ensure_sync_token(self) -> _Token:
+        """Return the token to use, authenticating first if it is expiring."""
+        with self._lock:
+            if self._token_is_expiring():
+                self._token = self._do_sync_auth()
+            return self._require_token()
+
+    async def _ensure_async_token(self) -> _Token:
+        """Return the token to use, authenticating first if it is expiring."""
+        async with self._get_async_lock():
+            if self._token_is_expiring():
+                self._token = await self._do_async_auth()
+            return self._require_token()
+
+    def _reauthenticate_sync(self, token_used: _Token) -> _Token:
+        """Re-authenticate after a 401 unless another caller already replaced our token.
+
+        Caller must hold self._lock.
+
+        A 401 means the server rejected the token we actually sent, so we always
+        refresh -- expiry is not a sufficient test (see _token_is_expiring). The one
+        exception is that another thread may have replaced the token while our request
+        was in flight, in which case retrying with the newer token is enough and a
+        second login would be wasted. Comparing identity rather than expiry gives us
+        that de-duplication without ever suppressing a genuinely needed refresh.
+        """
+        if self._token is token_used:
+            logger.debug("Received 401 Unauthorized, re-authenticating")
+            self._token = self._do_sync_auth()
+        else:
+            logger.debug(
+                "Received 401 Unauthorized; token was already replaced concurrently,"
+                " retrying with the newer token"
+            )
+        return self._require_token()
+
+    async def _reauthenticate_async(self, token_used: _Token) -> _Token:
+        """Re-authenticate after a 401 unless another caller already replaced our token.
+
+        Caller must hold the loop's async lock. See _reauthenticate_sync for rationale.
+        """
+        if self._token is token_used:
+            logger.debug("Received 401 Unauthorized, re-authenticating")
+            self._token = await self._do_async_auth()
+        else:
+            logger.debug(
+                "Received 401 Unauthorized; token was already replaced concurrently,"
+                " retrying with the newer token"
+            )
+        return self._require_token()
+
     @property
     def folio_auth_token(self):
         """Property that returns a currently valid FOLIO auth token"""
-        with self._lock:
-            if not self._token or self._token_is_expiring():
-                self._token = self._do_sync_auth()
-            return self._token.auth_token
+        return self._ensure_sync_token().auth_token
 
     @property
     def folio_refresh_token(self):
         """Property that returns the currently valid FOLIO refresh token"""
-        with self._lock:
-            if not self._token or self._token_is_expiring():
-                self._token = self._do_sync_auth()
-            return self._token.refresh_token
+        return self._ensure_sync_token().refresh_token
