@@ -12,9 +12,18 @@ The retry system automatically handles:
 - **Exponential backoff** to avoid overwhelming servers
 - **Configurable limits** to prevent infinite retry loops
 
+There are two independent layers, and it is worth knowing which one you are configuring:
+
+1. **The authentication flow** (`FolioAuth`) always makes one automatic retry attempt on a
+   401 or a 403. This is not opt-in, and it applies to every request.
+2. **The retry decorators** (tenacity) add further attempts with exponential backoff on top
+   of that. These are opt-in via the environment variables below.
+
 ## Quick Start
 
-By default, **no retries are performed** - you must opt-in by setting environment variables:
+The decorator-based retries perform **no additional attempts by default** - you must opt-in
+by setting environment variables. (The single authentication-flow retry described above
+happens regardless.)
 
 ```bash
 # Enable basic server error retries
@@ -68,6 +77,47 @@ Configure retry behavior for authorization errors (403):
 | `FOLIOCLIENT_AUTH_ERROR_MAX_WAIT` | `60.0` | Maximum wait time between retries |
 
 **Note**: Auth errors include automatic re-authentication before retry attempts.
+
+### Authentication Flow Retries
+
+These apply to the single retry that `FolioAuth` performs inside the authentication flow,
+before the decorator-based retries above are involved.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FOLIOCLIENT_FORBIDDEN_RETRY_DELAY` | `1.0` | Seconds to wait before replaying a request that returned 403 |
+
+#### Why a 403 is retried at all
+
+FOLIO's Keycloak integration currently translates every backend error that is not a 200,
+401 or 403 into a **403**. In practice this means a 403 is frequently a *masked transient
+failure* - a timeout, a 502/503, a dropped connection - rather than a genuine permission
+denial. The authentication flow therefore replays a 403 once.
+
+Because the condition has rarely cleared by the time an immediate replay reaches the
+server, the retry waits briefly first. The delay is deliberately short: a real permission
+denial cannot be distinguished from a masked transient today, so it pays the same cost.
+
+```bash
+# Wait longer, for environments with slower-recovering transient failures
+export FOLIOCLIENT_FORBIDDEN_RETRY_DELAY=3.0
+
+# Replay immediately, with no wait
+export FOLIOCLIENT_FORBIDDEN_RETRY_DELAY=0
+```
+
+Set it to `0` if your deployment returns 403 only for genuine permission denials, since
+in that case the wait is pure overhead. Once FOLIO passes real status codes through rather
+than collapsing them into 403, `0` becomes the better default.
+
+For heavier recovery, combine this with `FOLIOCLIENT_MAX_AUTH_ERROR_RETRIES`, which adds
+further attempts with exponential backoff *and* a fresh login between them.
+
+:::{note}
+A 401 is always followed by re-authentication and one retry, with no delay, because a 401
+is an authoritative statement that the token was rejected rather than a possibly-masked
+transient. There is no delay setting for it.
+:::
 
 ### Legacy Variables
 
@@ -274,6 +324,13 @@ The `handle_remote_protocol_error`, `use_client_session`, and `use_client_sessio
 **Issue**: Too many retries
 - **Solution**: Reduce `FOLIOCLIENT_MAX_*_ERROR_RETRIES`
 - **Solution**: Check for systemic issues causing repeated failures
+
+**Issue**: Requests that end in a 403 take about a second longer than expected
+- **Cause**: The authentication flow waits `FOLIOCLIENT_FORBIDDEN_RETRY_DELAY` (default
+  `1.0s`) before replaying a 403, because FOLIO frequently reports masked transient
+  failures as 403
+- **Solution**: If your deployment returns 403 only for genuine permission denials, set
+  `FOLIOCLIENT_FORBIDDEN_RETRY_DELAY=0`
 
 ### Debugging
 
