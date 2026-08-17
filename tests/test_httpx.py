@@ -324,9 +324,12 @@ def test_folio_auth_token_refreshes_when_expired(monkeypatch):
         assert fa.folio_auth_token == "old"
 
 
-def test_sync_auth_flow_pass_branch_no_refresh(monkeypatch):
+def test_sync_401_skips_reauth_when_token_replaced_concurrently(monkeypatch):
+    """A 401 must NOT re-authenticate if another caller already replaced our token.
+
+    De-duplication is by token identity, so retrying with the newer token is enough.
+    """
     params = make_params()
-    # initial auth response with future expiration
     now = datetime.now(tz=timezone.utc)
     resp = DummyResponse(cookies={"folioAccessToken": "init", "folioRefreshToken": "init-r"}, json_data={"accessTokenExpiration": (now + timedelta(hours=1)).isoformat()})
 
@@ -335,18 +338,88 @@ def test_sync_auth_flow_pass_branch_no_refresh(monkeypatch):
 
     with httpx_client_patcher(fake_client):
         fa = FolioAuth(params)
-        fa._do_sync_auth = lambda: (_ for _ in ()).throw(RuntimeError("should not refresh"))
         req = httpx.Request("GET", "https//folio/resource")
         gen = fa.sync_auth_flow(req)
         next(gen)
+        # Simulate another thread refreshing while our request was in flight
+        fa._token = make_token("newer")
+        fa._do_sync_auth = lambda: (_ for _ in ()).throw(RuntimeError("should not refresh"))
         yielded = gen.send(DummyResponse(status_code=401))
         assert yielded is req
         with pytest.raises(StopIteration):
             gen.send(DummyResponse(status_code=200))
 
 
+def test_sync_401_reauths_even_when_token_looks_valid(monkeypatch):
+    """A 401 is authoritative: refresh even when the token is nowhere near expiry.
+
+    Covers revocation, Keycloak key rotation and clock skew, where the local expiry
+    check cannot tell that the server has stopped accepting the token.
+    """
+    params = make_params()
+    now = datetime.now(tz=timezone.utc)
+    resp = DummyResponse(cookies={"folioAccessToken": "init", "folioRefreshToken": "init-r"}, json_data={"accessTokenExpiration": (now + timedelta(hours=1)).isoformat()})
+
+    def fake_client(*args, **kwargs):
+        return DummyClient(resp)
+
+    with httpx_client_patcher(fake_client):
+        fa = FolioAuth(params)
+        assert fa._token_is_expiring() is False  # looks perfectly good locally
+        calls = []
+
+        def refreshed():
+            calls.append(1)
+            return make_token("refreshed")
+
+        fa._do_sync_auth = refreshed
+        req = httpx.Request("GET", "https//folio/resource")
+        gen = fa.sync_auth_flow(req)
+        next(gen)
+        yielded = gen.send(DummyResponse(status_code=401))
+        assert yielded is req
+        assert calls == [1], "expected exactly one re-authentication"
+        assert fa._token.auth_token == "refreshed"
+        with pytest.raises(StopIteration):
+            gen.send(DummyResponse(status_code=200))
+
+
+def test_sync_401_retry_carries_the_new_token_cookies(monkeypatch):
+    """The retry must actually be sent with the refreshed cookies, not the stale ones."""
+    params = make_params()
+    # Future expiry, so the proactive check does not refresh before the first request.
+    resp = DummyResponse(
+        cookies={"folioAccessToken": "stale", "folioRefreshToken": "stale-r"},
+        json_data={
+            "accessTokenExpiration": (
+                datetime.now(tz=timezone.utc) + timedelta(hours=1)
+            ).isoformat()
+        },
+    )
+
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        fresh = httpx.Cookies()
+        fresh.set("folioAccessToken", "fresh-token")
+        fa._do_sync_auth = lambda: FolioAuth._Token(
+            auth_token="fresh-token",
+            refresh_token="fresh-r",
+            expires_at=datetime.now(tz=timezone.utc) + timedelta(hours=1),
+            refresh_token_expires_at=None,
+            cookies=fresh,
+        )
+        req = httpx.Request("GET", "https//folio/resource")
+        gen = fa.sync_auth_flow(req)
+        next(gen)
+        assert "stale" in req.headers["Cookie"]
+        gen.send(DummyResponse(status_code=401))
+        assert "fresh-token" in req.headers["Cookie"]
+        assert "stale" not in req.headers["Cookie"]
+
+
 @pytest.mark.asyncio
-async def test_async_auth_flow_pass_branch_no_refresh(monkeypatch):
+async def test_async_401_skips_reauth_when_token_replaced_concurrently(monkeypatch):
+    """Async: a 401 must NOT re-authenticate if the token was already replaced."""
     params = make_params()
     now = datetime.now(tz=timezone.utc)
     resp = DummyResponse(cookies={"folioAccessToken": "i2", "folioRefreshToken": "r2"}, json_data={"accessTokenExpiration": (now + timedelta(hours=1)).isoformat()})
@@ -358,17 +431,96 @@ async def test_async_auth_flow_pass_branch_no_refresh(monkeypatch):
 
     with httpx_client_patcher(fake_client, fake_async_client):
         fa = FolioAuth(params)
-        async def should_not_call():
-            raise RuntimeError("should not be called")
-        fa._do_async_auth = should_not_call
         req = httpx.Request("GET", "https//folio/asyncpass")
         agen = fa.async_auth_flow(req)
         first = await agen.__anext__()
         assert first is req
+        fa._token = make_token("newer")
+
+        async def should_not_call():
+            raise RuntimeError("should not be called")
+
+        fa._do_async_auth = should_not_call
         second = await agen.asend(DummyResponse(status_code=401))
         assert second is req
         with pytest.raises(StopAsyncIteration):
             await agen.asend(DummyResponse(status_code=200))
+
+
+@pytest.mark.asyncio
+async def test_async_401_reauths_even_when_token_looks_valid(monkeypatch):
+    """Async: a 401 re-authenticates even when the token is nowhere near expiry."""
+    params = make_params()
+    now = datetime.now(tz=timezone.utc)
+    resp = DummyResponse(cookies={"folioAccessToken": "i2", "folioRefreshToken": "r2"}, json_data={"accessTokenExpiration": (now + timedelta(hours=1)).isoformat()})
+
+    def fake_client(*args, **kwargs):
+        return DummyClient(resp)
+    def fake_async_client(*args, **kwargs):
+        return DummyAsyncClient(resp)
+
+    with httpx_client_patcher(fake_client, fake_async_client):
+        fa = FolioAuth(params)
+        assert fa._token_is_expiring() is False
+        calls = []
+
+        async def refreshed():
+            calls.append(1)
+            return make_token("refreshed")
+
+        fa._do_async_auth = refreshed
+        req = httpx.Request("GET", "https//folio/asyncpass")
+        agen = fa.async_auth_flow(req)
+        await agen.__anext__()
+        second = await agen.asend(DummyResponse(status_code=401))
+        assert second is req
+        assert calls == [1], "expected exactly one re-authentication"
+        with pytest.raises(StopAsyncIteration):
+            await agen.asend(DummyResponse(status_code=200))
+
+
+def test_concurrent_threads_401_trigger_one_reauth(monkeypatch):
+    """N sync threads all seeing a 401 on the same token must produce one login.
+
+    The first thread to take the lock refreshes; the rest see a different token
+    identity and retry with it instead of logging in again.
+    """
+    import threading
+    import time
+
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "shared", "folioRefreshToken": "r"})
+
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        calls = []
+        calls_guard = threading.Lock()
+
+        def slow_login():
+            with calls_guard:
+                calls.append(1)
+            time.sleep(0.05)  # the network round trip
+            return make_token(f"tok{len(calls)}")
+
+        started = threading.Barrier(8)
+
+        def one_request():
+            gen = fa.sync_auth_flow(httpx.Request("GET", "https//folio/x"))
+            next(gen)
+            started.wait()  # all threads hold the same token before any sees a 401
+            fa._do_sync_auth = slow_login
+            try:
+                gen.send(DummyResponse(status_code=401))
+                gen.send(DummyResponse(status_code=200))
+            except StopIteration:
+                pass
+
+        threads = [threading.Thread(target=one_request) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(calls) == 1, f"expected 1 login for 8 threads on one token, got {len(calls)}"
 
 
 @pytest.mark.asyncio
