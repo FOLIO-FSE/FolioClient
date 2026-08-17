@@ -1237,3 +1237,84 @@ async def test_async_streaming_401_still_refreshes_the_token():
         with pytest.raises(StopAsyncIteration):
             await agen.asend(DummyResponse(status_code=401))
         assert fa._token.auth_token == "refreshed"
+
+
+# --- Sync lock reentrancy --------------------------------------------------------
+
+
+class ReentrancyDetectingLock:
+    """RLock wrapper that raises if one thread acquires it while already holding it.
+
+    FolioAuth._lock is an RLock so that unexpected nesting degrades to a redundant
+    login rather than hanging a caller's process on a lock held across network I/O.
+    That safety net must not silently excuse real nesting, so we assert here what
+    RLock permits at runtime.
+    """
+
+    def __init__(self):
+        import threading
+
+        self._real = threading.RLock()
+        self._state = threading.local()
+        self.acquisitions = 0
+
+    def __enter__(self):
+        depth = getattr(self._state, "depth", 0)
+        if depth:
+            raise AssertionError(f"_lock acquired reentrantly (depth {depth + 1})")
+        self._state.depth = depth + 1
+        self.acquisitions += 1
+        return self._real.__enter__()
+
+    def __exit__(self, *exc):
+        self._state.depth -= 1
+        return self._real.__exit__(*exc)
+
+
+def test_reentrancy_detector_actually_detects():
+    """Guard the guard: a detector that never fires would make the test below vacuous."""
+    lock = ReentrancyDetectingLock()
+    with lock:
+        with pytest.raises(AssertionError, match="reentrantly"):
+            with lock:
+                pass
+
+
+def test_sync_lock_is_never_acquired_reentrantly(monkeypatch):
+    """No sync path may acquire _lock while already holding it.
+
+    Covers the proactive refresh, the token properties, the 401 re-authentication and
+    the 403 retry. If a future change puts an access_token / folio_auth_token read
+    inside a locked region, this fails instead of deadlocking a user in production.
+    """
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t", "folioRefreshToken": "r"})
+
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        detector = ReentrancyDetectingLock()
+        fa._lock = detector
+
+        # Proactive refresh via _ensure_sync_token, plus both token properties.
+        fa._token = None
+        assert fa.folio_auth_token == "t"
+        assert fa.folio_refresh_token == "r"
+
+        # Proactive refresh inside sync_auth_flow, then the 401 re-authentication.
+        fa._token = make_token("current", expires_in=-timedelta(minutes=5))
+        gen = fa.sync_auth_flow(httpx.Request("GET", "https//folio/x"))
+        next(gen)
+        gen.send(DummyResponse(status_code=401))
+        with pytest.raises(StopIteration):
+            gen.send(DummyResponse(status_code=200))
+
+        # The 403 retry path (does not lock, but must not start doing so reentrantly).
+        gen2 = fa.sync_auth_flow(httpx.Request("GET", "https//folio/x"))
+        next(gen2)
+        gen2.send(DummyResponse(status_code=403))
+        with pytest.raises(StopIteration):
+            gen2.send(DummyResponse(status_code=200))
+
+        assert detector.acquisitions >= 3, (
+            f"expected the locked paths to be exercised, saw {detector.acquisitions}"
+        )

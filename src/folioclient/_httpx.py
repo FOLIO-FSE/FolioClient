@@ -86,6 +86,21 @@ class FolioAuth(httpx.Auth):
         # across network I/O (see sync_auth_flow and FolioClient.login), which is fine
         # for worker threads but means it must never be awaited on by an event loop.
         # That is why _get_async_lock does not use it. See _get_async_lock.
+        #
+        # WHY RLock WHEN NOTHING NESTS? Nothing does, and nothing should: every holder
+        # calls only _do_sync_auth, which builds a bare httpx.Client with no auth
+        # attached and so cannot re-enter this flow, and every `yield request` sits
+        # outside the locked region so no caller-supplied code (event hooks, custom
+        # transports) runs while it is held. The reentrancy is purely a safety net.
+        # Because the lock spans network I/O with a possibly unlimited timeout, an
+        # accidental nested acquire under a plain threading.Lock would hang the user's
+        # process outright; under RLock it degrades to a redundant login instead.
+        #
+        # That net must not become cover for real nesting, so the invariant is enforced
+        # in tests rather than by the primitive: see
+        # test_sync_lock_is_never_acquired_reentrantly. If you add code inside a locked
+        # region, do not let it touch folio_auth_token / access_token -- those acquire
+        # this lock, and that test will fail.
         self._lock: threading.RLock = threading.RLock()
 
         # One asyncio.Lock per event loop, keyed weakly so that entries disappear when
