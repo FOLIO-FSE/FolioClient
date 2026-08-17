@@ -1004,3 +1004,236 @@ def test_event_loop_not_stalled_while_sync_login_holds_lock(monkeypatch):
         elapsed = asyncio.run(main())
         assert released.is_set()
         assert elapsed < 0.2, f"_get_async_lock blocked for {elapsed:.3f}s on the sync lock"
+
+
+# --- 403 retry: replayability and delay ------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _no_forbidden_retry_delay(monkeypatch):
+    """Neutralize the 403 retry delay for the whole module so tests stay fast.
+
+    Tests that care about the delay set the variable themselves. The default value is
+    asserted separately in test_forbidden_retry_delay_default, so this fixture cannot
+    hide a change to it.
+    """
+    monkeypatch.setenv("FOLIOCLIENT_FORBIDDEN_RETRY_DELAY", "0")
+
+
+def test_forbidden_retry_delay_default(monkeypatch):
+    monkeypatch.delenv("FOLIOCLIENT_FORBIDDEN_RETRY_DELAY", raising=False)
+    assert FolioAuth._forbidden_retry_delay() == 1.0
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [("0", 0.0), ("0.25", 0.25), ("2.5", 2.5), ("-5", 0.0), ("bogus", 1.0), ("", 1.0)],
+)
+def test_forbidden_retry_delay_from_env(monkeypatch, raw, expected):
+    monkeypatch.setenv("FOLIOCLIENT_FORBIDDEN_RETRY_DELAY", raw)
+    assert FolioAuth._forbidden_retry_delay() == expected
+
+
+def test_403_retry_waits_before_replaying(monkeypatch):
+    """A masked transient 403 needs time to clear; an instant replay is unlikely to help."""
+    import time
+
+    monkeypatch.setenv("FOLIOCLIENT_FORBIDDEN_RETRY_DELAY", "0.2")
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t", "folioRefreshToken": "r"})
+
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        gen = fa.sync_auth_flow(httpx.Request("GET", "https//folio/x"))
+        next(gen)
+        start = time.perf_counter()
+        gen.send(DummyResponse(status_code=403))  # triggers the delayed retry
+        elapsed = time.perf_counter() - start
+        assert elapsed >= 0.2, f"retry replayed after only {elapsed:.3f}s"
+
+
+@pytest.mark.asyncio
+async def test_async_403_retry_waits_before_replaying(monkeypatch):
+    import time
+
+    monkeypatch.setenv("FOLIOCLIENT_FORBIDDEN_RETRY_DELAY", "0.2")
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t", "folioRefreshToken": "r"})
+
+    def fake_client(*a, **k):
+        return DummyClient(resp)
+
+    def fake_async_client(*a, **k):
+        return DummyAsyncClient(resp)
+
+    with httpx_client_patcher(fake_client, fake_async_client):
+        fa = FolioAuth(params)
+        agen = fa.async_auth_flow(httpx.Request("GET", "https//folio/x"))
+        await agen.__anext__()
+        start = time.perf_counter()
+        await agen.asend(DummyResponse(status_code=403))
+        elapsed = time.perf_counter() - start
+        assert elapsed >= 0.2
+
+
+def test_403_retry_delay_of_zero_does_not_sleep(monkeypatch):
+    """Setting the delay to 0 must restore immediate-replay behavior."""
+    import time
+
+    monkeypatch.setenv("FOLIOCLIENT_FORBIDDEN_RETRY_DELAY", "0")
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t", "folioRefreshToken": "r"})
+
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        gen = fa.sync_auth_flow(httpx.Request("GET", "https//folio/x"))
+        next(gen)
+        start = time.perf_counter()
+        gen.send(DummyResponse(status_code=403))
+        assert time.perf_counter() - start < 0.1
+
+
+# --- Request replayability -------------------------------------------------------
+
+
+def _generator_body():
+    yield b'{"record": "important"}'
+
+
+def test_in_memory_bodies_are_replayable():
+    assert FolioAuth._request_is_replayable(httpx.Request("GET", "https//folio/x"))
+    assert FolioAuth._request_is_replayable(
+        httpx.Request("POST", "https//folio/x", json={"a": 1})
+    )
+    assert FolioAuth._request_is_replayable(
+        httpx.Request("POST", "https//folio/x", content=b"raw-bytes")
+    )
+    assert FolioAuth._request_is_replayable(
+        httpx.Request("POST", "https//folio/x", data={"a": "1"})
+    )
+
+
+def test_multipart_is_replayable(tmp_path):
+    """files= produces a MultipartStream with no _content, but it IS replayable.
+
+    httpx seeks each file field back to 0 on every render, so testing _content alone
+    would wrongly drop the retry for every file upload.
+    """
+    f = tmp_path / "record.mrc"
+    f.write_bytes(b"RECORD-DATA")
+    req = httpx.Request("POST", "https//folio/x", files={"file": f.open("rb")})
+    assert not hasattr(req, "_content"), "precondition: multipart is not materialized"
+    assert FolioAuth._request_is_replayable(req)
+
+
+def test_multipart_bodies_really_do_replay_identically(tmp_path):
+    """Verify the assumption behind the multipart allowlist entry."""
+    f = tmp_path / "record.mrc"
+    f.write_bytes(b"RECORD-DATA")
+    req = httpx.Request("POST", "https//folio/x", files={"file": f.open("rb")})
+    first = b"".join(req.stream)
+    second = b"".join(req.stream)
+    assert first == second and b"RECORD-DATA" in first
+
+
+@pytest.mark.parametrize("body_kind", ["generator", "filehandle"])
+def test_streaming_bodies_are_not_replayable(tmp_path, body_kind):
+    if body_kind == "generator":
+        body = _generator_body()
+    else:
+        f = tmp_path / "record.mrc"
+        f.write_bytes(b"RECORD-DATA")
+        body = f.open("rb")
+    req = httpx.Request("POST", "https//folio/x", content=body)
+    assert not FolioAuth._request_is_replayable(req)
+
+
+def test_multipart_403_is_retried(tmp_path):
+    """End-to-end: a file upload must still get its 403 retry."""
+    f = tmp_path / "record.mrc"
+    f.write_bytes(b"RECORD-DATA")
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t", "folioRefreshToken": "r"})
+
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        req = httpx.Request("POST", "https//folio/x", files={"file": f.open("rb")})
+        gen = fa.sync_auth_flow(req)
+        next(gen)
+        retried = gen.send(DummyResponse(status_code=403))
+        assert retried is req, "multipart uploads must be retried on 403"
+
+
+def test_streaming_403_is_not_retried(tmp_path):
+    """A consumed stream must surface the 403 rather than a silently-emptied retry."""
+    params = make_params()
+    resp = DummyResponse(cookies={"folioAccessToken": "t", "folioRefreshToken": "r"})
+
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        req = httpx.Request("POST", "https//folio/x", content=_generator_body())
+        gen = fa.sync_auth_flow(req)
+        next(gen)
+        with pytest.raises(StopIteration):
+            gen.send(DummyResponse(status_code=403))
+
+
+def test_streaming_401_still_refreshes_the_token(tmp_path):
+    """We cannot retry a consumed stream, but the rejected token must still be replaced.
+
+    Otherwise every later request keeps using a token the server has rejected -- and
+    with an unknown expiry the client would never recover on its own.
+    """
+    params = make_params()
+    resp = DummyResponse(
+        cookies={"folioAccessToken": "stale", "folioRefreshToken": "r"},
+        json_data={
+            "accessTokenExpiration": (
+                datetime.now(tz=timezone.utc) + timedelta(hours=1)
+            ).isoformat()
+        },
+    )
+
+    with httpx_client_patcher(lambda *a, **k: DummyClient(resp)):
+        fa = FolioAuth(params)
+        assert fa._token.auth_token == "stale"
+        fa._do_sync_auth = lambda: make_token("refreshed")
+        req = httpx.Request("POST", "https//folio/x", content=_generator_body())
+        gen = fa.sync_auth_flow(req)
+        next(gen)
+        with pytest.raises(StopIteration):
+            gen.send(DummyResponse(status_code=401))
+        assert fa._token.auth_token == "refreshed", "token must be refreshed for later requests"
+
+
+@pytest.mark.asyncio
+async def test_async_streaming_401_still_refreshes_the_token():
+    params = make_params()
+    resp = DummyResponse(
+        cookies={"folioAccessToken": "stale", "folioRefreshToken": "r"},
+        json_data={
+            "accessTokenExpiration": (
+                datetime.now(tz=timezone.utc) + timedelta(hours=1)
+            ).isoformat()
+        },
+    )
+
+    def fake_client(*a, **k):
+        return DummyClient(resp)
+
+    def fake_async_client(*a, **k):
+        return DummyAsyncClient(resp)
+
+    with httpx_client_patcher(fake_client, fake_async_client):
+        fa = FolioAuth(params)
+
+        async def refreshed():
+            return make_token("refreshed")
+
+        fa._do_async_auth = refreshed
+        req = httpx.Request("POST", "https//folio/x", content=_generator_body())
+        agen = fa.async_auth_flow(req)
+        await agen.__anext__()
+        with pytest.raises(StopAsyncIteration):
+            await agen.asend(DummyResponse(status_code=401))
+        assert fa._token.auth_token == "refreshed"

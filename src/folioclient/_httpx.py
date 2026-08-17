@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
+import os
 import threading
+import time
 import weakref
 import httpx
 
@@ -11,6 +13,13 @@ from dataclasses import dataclass
 from dateutil.parser import isoparse
 from http import HTTPStatus
 from typing import TYPE_CHECKING, NamedTuple, Optional
+
+try:  # pragma: no cover - depends on the installed httpx internals
+    from httpx._multipart import MultipartStream as _MultipartStream
+except ImportError:  # pragma: no cover
+    # If httpx moves this, _request_is_replayable degrades to treating multipart as
+    # non-replayable, which costs a retry rather than corrupting a request body.
+    _MultipartStream = None
 
 if TYPE_CHECKING:  # pragma: no cover
     from collections.abc import AsyncGenerator, Generator
@@ -47,6 +56,16 @@ class FolioAuth(httpx.Auth):
     This class supports both Okapi and Eureka-based FOLIO systems.
     Works with both synchronous and asynchronous httpx clients.
     """
+
+    _UNREPLAYABLE_401_MESSAGE = (
+        "Refreshed the token after a 401, but this request's body is a consumed stream"
+        " and cannot be replayed; returning the 401 to the caller. Later requests will"
+        " use the new token."
+    )
+    _UNREPLAYABLE_403_MESSAGE = (
+        "Received 403 Forbidden, but this request's body is a consumed stream and cannot"
+        " be replayed; returning the 403 to the caller."
+    )
 
     class _Token(NamedTuple):
         auth_token: Optional[str]
@@ -175,8 +194,16 @@ class FolioAuth(httpx.Auth):
         response = yield request
 
         if response.status_code == HTTPStatus.UNAUTHORIZED:
+            # Refresh before considering the retry. The server rejected this token, and
+            # that is true whether or not we can replay this particular request, so
+            # returning early without refreshing would leave every later request using
+            # a token we already know is rejected.
             with self._lock:
                 token_used = self._reauthenticate_sync(token_used)
+
+            if not self._request_is_replayable(request):
+                logger.warning(self._UNREPLAYABLE_401_MESSAGE)
+                return
 
             self._set_auth_cookies_on_request(request, token_used)
             retry_response = yield request
@@ -193,7 +220,13 @@ class FolioAuth(httpx.Auth):
                 )
 
         elif response.status_code == HTTPStatus.FORBIDDEN:
-            logger.debug("Received unexpected 403 Forbidden. Will retry request once.")
+            if not self._request_is_replayable(request):
+                logger.warning(self._UNREPLAYABLE_403_MESSAGE)
+                return
+            delay = self._forbidden_retry_delay()
+            logger.debug("Received unexpected 403 Forbidden. Retrying once after %.3gs.", delay)
+            if delay:
+                time.sleep(delay)
             retry_response = yield request
             if retry_response.status_code == HTTPStatus.FORBIDDEN:
                 # Ensure response body is available to callers inspecting exception.response.text
@@ -214,8 +247,13 @@ class FolioAuth(httpx.Auth):
         response = yield request
 
         if response.status_code == HTTPStatus.UNAUTHORIZED:
+            # Refresh before considering the retry -- see sync_auth_flow for why.
             async with self._get_async_lock():
                 token_used = await self._reauthenticate_async(token_used)
+
+            if not self._request_is_replayable(request):
+                logger.warning(self._UNREPLAYABLE_401_MESSAGE)
+                return
 
             self._set_auth_cookies_on_request(request, token_used)
             retry_response = yield request
@@ -232,7 +270,13 @@ class FolioAuth(httpx.Auth):
                 )
 
         elif response.status_code == HTTPStatus.FORBIDDEN:
-            logger.debug("Received unexpected 403 Forbidden. Will retry request once.")
+            if not self._request_is_replayable(request):
+                logger.warning(self._UNREPLAYABLE_403_MESSAGE)
+                return
+            delay = self._forbidden_retry_delay()
+            logger.debug("Received unexpected 403 Forbidden. Retrying once after %.3gs.", delay)
+            if delay:
+                await asyncio.sleep(delay)
             retry_response = yield request
             if retry_response.status_code == HTTPStatus.FORBIDDEN:
                 # Ensure response body is available to callers inspecting exception.response.text
@@ -390,6 +434,62 @@ class FolioAuth(httpx.Auth):
             or not self._token.expires_at
             or (datetime.now(tz=timezone.utc) + timedelta(seconds=60)) >= self._token.expires_at
         )
+
+    @staticmethod
+    def _request_is_replayable(request: httpx.Request) -> bool:
+        """Return True if this request's body can safely be sent a second time.
+
+        Retrying means yielding the same httpx.Request again, which re-iterates
+        request.stream. Whether that is safe depends on which stream httpx chose:
+
+        - bytes / json / form data -> ByteStream, and httpx sets request._content.
+          The body lives in memory, so re-iteration replays it. Safe.
+        - multipart (files=) -> MultipartStream, and _content is NOT set. It is still
+          replayable, because FileField.render_data seeks each file back to 0 on every
+          render; two sends produce byte-identical bodies. Testing `_content` alone
+          therefore misclassifies every file upload as non-replayable and silently
+          drops its retry -- which matters most for uploads, where a masked transient
+          403 is exactly what we want to recover from.
+        - a generator or file object -> IteratorByteStream, consumed by the first send.
+          Generators raise StreamConsumed on replay (loud). File objects are worse:
+          .read() at EOF yields b"", so the retry silently becomes a zero-length
+          POST/PUT that the caller believes carried a full body.
+
+        CARE POINT: this is written as an allowlist on purpose. If an httpx internal
+        changes and we get it wrong, the failure is "we skip a retry we could have
+        done" (harmless) rather than "we send a truncated body" (data loss). Do not
+        invert it into a denylist on IteratorByteStream for brevity.
+        """
+        if hasattr(request, "_content"):
+            return True
+        return _MultipartStream is not None and isinstance(request.stream, _MultipartStream)
+
+    @staticmethod
+    def _forbidden_retry_delay() -> float:
+        """Seconds to wait before replaying a request that came back 403.
+
+        WHY WAIT AT ALL? FOLIO's Keycloak integration currently translates every
+        backend error that is not a 200/401/403 into a 403, so in practice a 403 is
+        frequently a *masked transient* failure -- a timeout, a 502/503, a reset
+        connection -- rather than a real permission denial. An immediate replay is
+        poorly matched to that: the condition has rarely cleared microseconds later.
+
+        WHY KEEP IT SHORT? A genuine permission denial cannot be distinguished from a
+        masked transient today, so it pays this delay too. Heavier recovery belongs to
+        folio_retry_on_auth_error, which already retries 403 with exponential backoff
+        and a fresh login (though it is off by default -- see
+        FOLIOCLIENT_MAX_AUTH_ERROR_RETRIES).
+
+        Tunable via FOLIOCLIENT_FORBIDDEN_RETRY_DELAY; set it to 0 to restore the
+        previous immediate-replay behavior. Once FOLIO passes real status codes
+        through, 0 becomes the better default and this can be retired.
+        """
+        raw = os.environ.get("FOLIOCLIENT_FORBIDDEN_RETRY_DELAY", "1.0")
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            logger.warning("Invalid FOLIOCLIENT_FORBIDDEN_RETRY_DELAY %r; using 1.0 seconds.", raw)
+            return 1.0
 
     def _require_token(self) -> _Token:
         """Return the current token, failing loudly if there somehow is none."""
