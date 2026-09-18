@@ -69,6 +69,8 @@ USER_AGENT_STRING = "Folio Client (https://github.com/FOLIO-FSE/FolioClient)"
 
 PROTECTED_CACHED_PROPERTIES = ["current_user", "ecs_consortium", "ecs_members"]
 
+UNUSED_KWARGS_DEBUG_MSG = "Unused kwargs: %s"
+
 # Set up logger
 logger = logging.getLogger("FolioClient")
 
@@ -1493,7 +1495,9 @@ class FolioClient:
             limit (int): The maximum number of records to fetch in each chunk.
                 Defaults to 10.
             no_cql (bool): Whether to skip CQL query processing. Defaults to False.
-            **kwargs: Additional URL parameters to pass to the endpoint.
+            **kwargs: Additional URL parameters to pass to the endpoint. The special
+                key `headers` (dict) is applied as extra HTTP headers on each request
+                instead of being treated as a query parameter.
 
         Yields:
             dict: Individual records from the FOLIO API.
@@ -1536,11 +1540,12 @@ class FolioClient:
         """
         offset = 0
 
+        headers = kwargs.pop("headers", {})
         # Initial fetch
         query_params: Dict[str, Any] = self._construct_query_parameters(
             query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
         )
-        temp_res = self.folio_get(path, key, query_params=query_params)
+        temp_res = self.folio_get(path, key, query_params=query_params, headers=headers)
         yield from temp_res
 
         # Continue fetching while we get full pages
@@ -1549,7 +1554,7 @@ class FolioClient:
             query_params = self._construct_query_parameters(
                 query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
             )
-            temp_res = self.folio_get(path, key, query_params=query_params)
+            temp_res = self.folio_get(path, key, query_params=query_params, headers=headers)
             yield from temp_res
 
         # Final fetch (handles edge case)
@@ -1557,7 +1562,7 @@ class FolioClient:
         final_query_params = self._construct_query_parameters(
             query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
         )
-        yield from self.folio_get(path, key, query_params=final_query_params)
+        yield from self.folio_get(path, key, query_params=final_query_params, headers=headers)
 
     async def folio_get_all_async(
         self,
@@ -1581,7 +1586,9 @@ class FolioClient:
             query (str): The query string to filter the data objects, default is None.
             limit (int): The maximum number of records to fetch in each chunk, default is 10.
             no_cql (bool): If True, disables CQL query processing, default is False.
-            **kwargs: Additional URL parameters to pass to `path`.
+            **kwargs: Additional URL parameters to pass to `path`. The special key
+                `headers` (dict) is applied as extra HTTP headers on each request
+                instead of being treated as a query parameter.
 
         Yields:
             dict: Individual records from the FOLIO API.
@@ -1628,11 +1635,14 @@ class FolioClient:
         """
         offset = 0
 
+        headers = kwargs.pop("headers", {})
         # Initial fetch
         query_params: Dict[str, Any] = self._construct_query_parameters(
             query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
         )
-        temp_res = await self.folio_get_async(path, key, query_params=query_params)
+        temp_res = await self.folio_get_async(
+            path, key, query_params=query_params, headers=headers
+        )
         for item in temp_res:
             yield item
 
@@ -1642,7 +1652,9 @@ class FolioClient:
             query_params = self._construct_query_parameters(
                 query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
             )
-            temp_res = await self.folio_get_async(path, key, query_params=query_params)
+            temp_res = await self.folio_get_async(
+                path, key, query_params=query_params, headers=headers
+            )
             for item in temp_res:
                 yield item
 
@@ -1651,7 +1663,9 @@ class FolioClient:
         final_query_params = self._construct_query_parameters(
             query=query, limit=limit, offset=offset * limit, no_cql=no_cql, **kwargs
         )
-        final_res = await self.folio_get_async(path, key, query_params=final_query_params)
+        final_res = await self.folio_get_async(
+            path, key, query_params=final_query_params, headers=headers
+        )
         for item in final_res:
             yield item
 
@@ -1679,11 +1693,12 @@ class FolioClient:
         # Prepare and validate query using shared logic
         offset = None
 
+        headers = kwargs.pop("headers", {})
         # Initial fetch
         query_params: Dict[str, Any] = self._construct_query_parameters(
             query=query, limit=limit, no_cql=no_cql, **kwargs
         )
-        temp_res = self.folio_get(path, key, query_params=query_params)
+        temp_res = self.folio_get(path, key, query_params=query_params, headers=headers)
 
         # Handle empty results
         if not temp_res:
@@ -1698,7 +1713,7 @@ class FolioClient:
                 query=query, limit=limit, no_cql=no_cql, **kwargs
             )
             query_params["query"] = self.construct_id_offset_query(query_params["query"], offset)
-            temp_res = self.folio_get(path, key, query_params=query_params)
+            temp_res = self.folio_get(path, key, query_params=query_params, headers=headers)
 
             if not temp_res:
                 return
@@ -1731,11 +1746,14 @@ class FolioClient:
         # Prepare and validate query using shared logic
         offset = None
 
+        headers = kwargs.pop("headers", {})
         # Initial fetch
         query_params: Dict[str, Any] = self._construct_query_parameters(
             query=query, limit=limit, no_cql=no_cql, **kwargs
         )
-        temp_res = await self.folio_get_async(path, key, query_params=query_params)
+        temp_res = await self.folio_get_async(
+            path, key, query_params=query_params, headers=headers
+        )
 
         # Handle empty results
         if not temp_res:
@@ -1751,7 +1769,9 @@ class FolioClient:
                 query=query, limit=limit, no_cql=no_cql, **kwargs
             )
             query_params["query"] = self.construct_id_offset_query(query_params["query"], offset)
-            temp_res = await self.folio_get_async(path, key, query_params=query_params)
+            temp_res = await self.folio_get_async(
+                path, key, query_params=query_params, headers=headers
+            )
 
             if not temp_res:
                 return
@@ -1779,7 +1799,7 @@ class FolioClient:
             Dict[str, Any]: Processed query parameters dictionary.
         """
         params = kwargs
-        if query := kwargs.get("query"):
+        if query := kwargs.pop("query", None):
             if query.startswith(("?", "query=")):  # Handle previous query specification syntax
                 params["query"] = query.split("=", maxsplit=1)[1]
             else:
@@ -1800,20 +1820,24 @@ class FolioClient:
         return self.folio_get_all(path, key, query)
 
     async def get_all_async(
-        self, path, key=None, query=""
+        self,
+        path,
+        key=None,
+        query="",
+        **kwargs,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Async alias for `folio_get_all_async`
 
         Note: This method wraps folio_get_all_async() for consistency.
         For direct access, use folio_get_all_async() instead.
         """
-        async for item in self.folio_get_all_async(path, key, query):
+        async for item in self.folio_get_all_async(path, key, query, **kwargs):
             yield item
 
     @folio_retry_on_server_error
     @folio_retry_on_auth_error
     def folio_get(
-        self, path, key=None, query="", query_params: Optional[Dict[str, Any]] = None
+        self, path, key=None, query="", query_params: Optional[Dict[str, Any]] = None, **kwargs
     ) -> Any:
         """Fetches data from FOLIO and returns it as a JSON object.
 
@@ -1825,6 +1849,8 @@ class FolioClient:
                 Defaults to "".
             query_params (dict, optional): Additional query parameters for the specified
                 path. May also be used for query. Defaults to None.
+            **kwargs: The special key `headers` (dict) is applied as extra HTTP
+                headers on the request instead of being treated as a query parameter.
 
         Returns:
             Any: Returns value matching key or the JSON object as a dict
@@ -1840,12 +1866,17 @@ class FolioClient:
             FolioGatewayTimeoutError: For 504 gateway timeout errors.
             FolioConnectionError: For network connectivity issues.
         """
-        return self._folio_get(path, key, query, query_params=query_params)
+        return self._folio_get(path, key, query, query_params=query_params, **kwargs)
 
     @folio_retry_on_server_error
     @folio_retry_on_auth_error
     async def folio_get_async(
-        self, path, key=None, query="", query_params: Optional[Dict[str, Any]] = None
+        self,
+        path,
+        key=None,
+        query="",
+        query_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> Any:
         """Asynchronously fetches data from FOLIO and returns it as a JSON object.
 
@@ -1857,17 +1888,24 @@ class FolioClient:
                 Defaults to "".
             query_params (dict, optional): Additional query parameters for the specified
                 path. May also be used for query. Defaults to None.
+            **kwargs: The special key `headers` (dict) is applied as extra HTTP
+                headers on the request instead of being treated as a query parameter.
 
         Returns:
             Any: Returns value matching key or the JSON object as a dict
         """
-        return await self._folio_get_async(path, key, query, query_params=query_params)
+        return await self._folio_get_async(path, key, query, query_params=query_params, **kwargs)
 
     @folio_errors
     @handle_remote_protocol_error
     @use_client_session
     def _folio_get(
-        self, path, key=None, query="", query_params: Optional[Dict[str, Any]] = None
+        self,
+        path,
+        key=None,
+        query="",
+        query_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> Any:
         """Private method that implements folio_get.
 
@@ -1882,11 +1920,12 @@ class FolioClient:
         """
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
+        headers = kwargs.pop("headers", {})
         if query and query_params:
             query_params = self._construct_query_parameters(query=query, **query_params)
         elif query:
             query_params = self._construct_query_parameters(query=query)
-        req = self.httpx_client.get(path, params=query_params)
+        req = self.httpx_client.get(path, params=query_params, headers=headers)
         req.raise_for_status()
         return self.extract_response_data(req, key)
 
@@ -1894,7 +1933,12 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     async def _folio_get_async(
-        self, path, key=None, query="", query_params: Optional[Dict[str, Any]] = None
+        self,
+        path,
+        key=None,
+        query="",
+        query_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> Any:
         """
         Private async method that implements `folio_get_async`
@@ -1905,7 +1949,9 @@ class FolioClient:
             query_params = self._construct_query_parameters(query=query, **query_params)
         elif query:
             query_params = self._construct_query_parameters(query=query)
-        req = await self.async_httpx_client.get(path, params=query_params)
+        req = await self.async_httpx_client.get(
+            path, params=query_params, headers=kwargs.pop("headers", {})
+        )
         req.raise_for_status()
         return self.extract_response_data(req, key)
 
@@ -1914,7 +1960,11 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     def folio_put(
-        self, path, payload, query_params: Optional[Dict[str, Any]] = None
+        self,
+        path,
+        payload,
+        query_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> Dict[str, Any] | None:
         """Convenience method to update data in FOLIO.
 
@@ -1922,6 +1972,8 @@ class FolioClient:
             path (str): FOLIO API endpoint path.
             payload (dict or str): The data to update as JSON dict or JSON string.
             query_params (dict, optional): Additional query parameters. Defaults to None.
+            **kwargs: The special key `headers` (dict) is applied as extra HTTP
+                headers on the request.
 
         Returns:
             dict: The JSON response from FOLIO.
@@ -1946,7 +1998,9 @@ class FolioClient:
             path,
             content=payload,
             params=query_params,
+            headers=kwargs.pop("headers", {}),
         )
+        logger.debug(UNUSED_KWARGS_DEBUG_MSG, kwargs)
         req.raise_for_status()
         return self.handle_json_response(req)
 
@@ -1955,7 +2009,11 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     async def folio_put_async(
-        self, path, payload, query_params: Optional[Dict[str, Any]] = None
+        self,
+        path,
+        payload,
+        query_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> Dict[str, Any] | None:
         """Asynchronous convenience method to update data in FOLIO.
 
@@ -1963,6 +2021,8 @@ class FolioClient:
             path (str): FOLIO API endpoint path.
             payload (dict or str): The data to update as JSON dict or JSON string.
             query_params (dict, optional): Additional query parameters. Defaults to None.
+            **kwargs: The special key `headers` (dict) is applied as extra HTTP
+                headers on the request.
 
         Returns:
             dict: The JSON response from FOLIO.
@@ -1970,10 +2030,13 @@ class FolioClient:
         """
         path = path.lstrip("/")
         payload = prepare_payload(payload)
+        headers = kwargs.pop("headers", {})
+        logger.debug(UNUSED_KWARGS_DEBUG_MSG, kwargs)
         req = await self.async_httpx_client.put(
             path,
             content=payload,
             params=query_params,
+            headers=headers,
         )
         req.raise_for_status()
         return self.handle_json_response(req)
@@ -1983,7 +2046,11 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     def folio_post(
-        self, path, payload, query_params: Optional[Dict[str, Any]] = None
+        self,
+        path,
+        payload,
+        query_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> Dict[str, Any] | None:
         """Convenience method to post data to FOLIO.
 
@@ -1991,6 +2058,8 @@ class FolioClient:
             path (str): FOLIO API endpoint path.
             payload (dict or str): The data to post as JSON dict or JSON string.
             query_params (dict, optional): Additional query parameters. Defaults to None.
+            **kwargs: The special key `headers` (dict) is applied as extra HTTP
+                headers on the request.
 
         Returns:
             dict: The JSON response from FOLIO.
@@ -2010,10 +2079,13 @@ class FolioClient:
         # Ensure path doesn't start with / for httpx base_url to work properly
         path = path.lstrip("/")
         payload = prepare_payload(payload)
+        headers = kwargs.pop("headers", {})
+        logger.debug(UNUSED_KWARGS_DEBUG_MSG, kwargs)
         req = self.httpx_client.post(
             path,
             content=payload,
             params=query_params,
+            headers=headers,
         )
         req.raise_for_status()
         return self.handle_json_response(req)
@@ -2023,7 +2095,11 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     async def folio_post_async(
-        self, path, payload, query_params: Optional[Dict[str, Any]] = None
+        self,
+        path,
+        payload,
+        query_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> Dict[str, Any] | None:
         """Asynchronous convenience method to post data to FOLIO.
 
@@ -2031,6 +2107,8 @@ class FolioClient:
             path (str): FOLIO API endpoint path.
             payload (dict or str): The data to post as JSON dict or JSON string.
             query_params (dict, optional): Additional query parameters. Defaults to None.
+            **kwargs: The special key `headers` (dict) is applied as extra HTTP
+                headers on the request.
 
         Returns:
             dict: The JSON response from FOLIO.
@@ -2043,7 +2121,9 @@ class FolioClient:
             path,
             content=payload,
             params=query_params,
+            headers=kwargs.pop("headers", {}),
         )
+        logger.debug(UNUSED_KWARGS_DEBUG_MSG, kwargs)
         req.raise_for_status()
         return self.handle_json_response(req)
 
@@ -2052,13 +2132,18 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     def folio_delete(
-        self, path, query_params: Optional[Dict[str, Any]] = None
+        self,
+        path,
+        query_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> Dict[str, Any] | None:
         """Convenience method to delete data in FOLIO.
 
         Args:
             path (str): FOLIO API endpoint path.
             query_params (dict, optional): Additional query parameters. Defaults to None.
+            **kwargs: The special key `headers` (dict) is applied as extra HTTP
+                headers on the request.
 
         Returns:
             dict: The response from FOLIO.
@@ -2079,7 +2164,9 @@ class FolioClient:
         req = self.httpx_client.delete(
             path,
             params=query_params,
+            headers=kwargs.pop("headers", {}),
         )
+        logger.debug(UNUSED_KWARGS_DEBUG_MSG, kwargs)
         return self.handle_delete_response(req, path)
 
     @folio_errors
@@ -2087,13 +2174,18 @@ class FolioClient:
     @handle_remote_protocol_error
     @use_client_session
     async def folio_delete_async(
-        self, path, query_params: Optional[Dict[str, Any]] = None
+        self,
+        path,
+        query_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> Dict[str, Any] | None:
         """Asynchronous convenience method to delete data in FOLIO
 
         Args:
             path (str): FOLIO API endpoint path.
             query_params (dict, optional): Additional query parameters. Defaults to None.
+            **kwargs: The special key `headers` (dict) is applied as extra HTTP
+                headers on the request.
 
         Returns:
             dict: The response from FOLIO.
@@ -2114,7 +2206,9 @@ class FolioClient:
         req = await self.async_httpx_client.delete(
             path,
             params=query_params,
+            headers=kwargs.pop("headers", {}),
         )
+        logger.debug(UNUSED_KWARGS_DEBUG_MSG, kwargs)
         return self.handle_delete_response(req, path)
 
     def get_folio_http_client(self) -> httpx.Client:
