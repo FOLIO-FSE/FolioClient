@@ -1061,6 +1061,418 @@ class TestPostPutPayloadTypes:
                 assert call_args[1]["content"] == payload.encode("utf-8")
 
 
+@patch.object(FolioClient, '_initial_ecs_check')
+class TestCustomHeaders:
+    """Tests for the custom `headers` kwarg supported by the folio_* methods."""
+
+    def test_folio_get_forwards_custom_headers(self, mock_ecs_check):
+        """Test that folio_get forwards a custom headers dict to the httpx client."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            with patch.object(FolioClient, 'get_folio_http_client') as mock_get_client:
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 200
+                mock_response.content = b'{"id": "1"}'
+                mock_response.json.return_value = {"id": "1"}
+                mock_response.raise_for_status.return_value = None
+                mock_client.get.return_value = mock_response
+                mock_client.is_closed = False
+                mock_client.__enter__.return_value = mock_client
+                mock_client.__exit__.return_value = False
+                mock_get_client.return_value = mock_client
+
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+                custom_headers = {"X-Custom": "abc"}
+                result = fc.folio_get("/test", headers=custom_headers)
+
+                mock_client.get.assert_called_once()
+                call_args = mock_client.get.call_args
+                assert call_args[1]["headers"] == custom_headers
+                assert result == {"id": "1"}
+
+    def test_folio_get_defaults_to_empty_headers(self, mock_ecs_check):
+        """Test that folio_get sends an empty headers dict when none is provided."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            with patch.object(FolioClient, 'get_folio_http_client') as mock_get_client:
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 200
+                mock_response.content = b'{"id": "1"}'
+                mock_response.json.return_value = {"id": "1"}
+                mock_response.raise_for_status.return_value = None
+                mock_client.get.return_value = mock_response
+                mock_client.is_closed = False
+                mock_client.__enter__.return_value = mock_client
+                mock_client.__exit__.return_value = False
+                mock_get_client.return_value = mock_client
+
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+                fc.folio_get("/test")
+
+                call_args = mock_client.get.call_args
+                assert call_args[1]["headers"] == {}
+
+    @pytest.mark.asyncio
+    async def test_folio_get_async_forwards_custom_headers(self, mock_ecs_check):
+        """Test that folio_get_async forwards a custom headers dict to the httpx client."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            with patch.object(FolioClient, 'get_folio_http_client_async') as mock_get_client:
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 200
+                mock_response.content = b'{"id": "1"}'
+                mock_response.json.return_value = {"id": "1"}
+                mock_response.raise_for_status = Mock(return_value=None)
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.is_closed = False
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_get_client.return_value = mock_client
+
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+                custom_headers = {"X-Custom": "abc"}
+                result = await fc.folio_get_async("/test", headers=custom_headers)
+
+                mock_client.get.assert_called_once()
+                call_args = mock_client.get.call_args
+                assert call_args[1]["headers"] == custom_headers
+                assert result == {"id": "1"}
+
+    def test_folio_put_forwards_custom_headers(self, mock_ecs_check):
+        """Test that folio_put forwards a custom headers dict to the httpx client."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            with patch.object(FolioClient, 'get_folio_http_client') as mock_get_client:
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 204
+                mock_response.json.return_value = None
+                mock_response.content = b''
+                mock_response.raise_for_status.return_value = None
+                mock_client.put.return_value = mock_response
+                mock_client.is_closed = False
+                mock_client.__enter__.return_value = mock_client
+                mock_client.__exit__.return_value = False
+                mock_get_client.return_value = mock_client
+
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+                custom_headers = {"X-Custom": "abc"}
+                fc.folio_put("/test/123", {"id": "123"}, headers=custom_headers)
+
+                mock_client.put.assert_called_once()
+                call_args = mock_client.put.call_args
+                assert call_args[1]["headers"] == custom_headers
+
+    @pytest.mark.asyncio
+    async def test_folio_put_async_forwards_custom_headers(self, mock_ecs_check):
+        """Test that folio_put_async forwards a custom headers dict to the httpx client."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            with patch.object(FolioClient, 'get_folio_http_client_async') as mock_get_client:
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 204
+                mock_response.json.return_value = None
+                mock_response.content = b''
+                mock_response.raise_for_status = Mock(return_value=None)
+                mock_client.put = AsyncMock(return_value=mock_response)
+                mock_client.is_closed = False
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_get_client.return_value = mock_client
+
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+                custom_headers = {"X-Custom": "abc"}
+                await fc.folio_put_async("/test/123", {"id": "123"}, headers=custom_headers)
+
+                mock_client.put.assert_called_once()
+                call_args = mock_client.put.call_args
+                assert call_args[1]["headers"] == custom_headers
+
+    def test_folio_post_forwards_custom_headers(self, mock_ecs_check):
+        """Test that folio_post forwards a custom headers dict to the httpx client."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            with patch.object(FolioClient, 'get_folio_http_client') as mock_get_client:
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 201
+                mock_response.json.return_value = {"id": "123"}
+                mock_response.content = b'{"id": "123"}'
+                mock_response.raise_for_status.return_value = None
+                mock_client.post.return_value = mock_response
+                mock_client.is_closed = False
+                mock_client.__enter__.return_value = mock_client
+                mock_client.__exit__.return_value = False
+                mock_get_client.return_value = mock_client
+
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+                custom_headers = {"X-Custom": "abc"}
+                fc.folio_post("/test", {"name": "test"}, headers=custom_headers)
+
+                mock_client.post.assert_called_once()
+                call_args = mock_client.post.call_args
+                assert call_args[1]["headers"] == custom_headers
+
+    @pytest.mark.asyncio
+    async def test_folio_post_async_forwards_custom_headers(self, mock_ecs_check):
+        """Test that folio_post_async forwards a custom headers dict to the httpx client."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            with patch.object(FolioClient, 'get_folio_http_client_async') as mock_get_client:
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 201
+                mock_response.json.return_value = {"id": "123"}
+                mock_response.content = b'{"id": "123"}'
+                mock_response.raise_for_status = Mock(return_value=None)
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.is_closed = False
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_get_client.return_value = mock_client
+
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+                custom_headers = {"X-Custom": "abc"}
+                await fc.folio_post_async("/test", {"name": "test"}, headers=custom_headers)
+
+                mock_client.post.assert_called_once()
+                call_args = mock_client.post.call_args
+                assert call_args[1]["headers"] == custom_headers
+
+    def test_folio_delete_forwards_custom_headers(self, mock_ecs_check):
+        """Test that folio_delete forwards a custom headers dict to the httpx client."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            with patch.object(FolioClient, 'get_folio_http_client') as mock_get_client:
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 204
+                mock_client.delete.return_value = mock_response
+                mock_client.is_closed = False
+                mock_client.__enter__.return_value = mock_client
+                mock_client.__exit__.return_value = False
+                mock_get_client.return_value = mock_client
+
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+                custom_headers = {"X-Custom": "abc"}
+                fc.folio_delete("/test/123", headers=custom_headers)
+
+                mock_client.delete.assert_called_once()
+                call_args = mock_client.delete.call_args
+                assert call_args[1]["headers"] == custom_headers
+
+    @pytest.mark.asyncio
+    async def test_folio_delete_async_forwards_custom_headers(self, mock_ecs_check):
+        """Test that folio_delete_async forwards a custom headers dict to the httpx client."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            with patch.object(FolioClient, 'get_folio_http_client_async') as mock_get_client:
+                mock_client = MagicMock()
+                mock_response = Mock()
+                mock_response.status_code = 204
+                mock_client.delete = AsyncMock(return_value=mock_response)
+                mock_client.is_closed = False
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_get_client.return_value = mock_client
+
+                fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+                custom_headers = {"X-Custom": "abc"}
+                await fc.folio_delete_async("/test/123", headers=custom_headers)
+
+                mock_client.delete.assert_called_once()
+                call_args = mock_client.delete.call_args
+                assert call_args[1]["headers"] == custom_headers
+
+    def test_folio_get_all_applies_headers_to_every_page(self, mock_ecs_check):
+        """Regression test: _folio_get_all must apply custom headers to the initial
+        fetch, every loop-iteration fetch, and the final edge-case fetch, and must
+        never leak the headers dict into query_params."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+            calls = []
+
+            def fake_folio_get(path, key=None, query="", query_params=None, **kwargs):
+                calls.append({"query_params": query_params, "headers": kwargs.get("headers")})
+                page_num = len(calls)
+                if page_num == 1:
+                    return [{"id": "1"}, {"id": "2"}]
+                elif page_num == 2:
+                    return [{"id": "3"}]
+                else:
+                    return []
+
+            fc.folio_get = fake_folio_get
+            custom_headers = {"X-Custom": "value"}
+
+            results = list(
+                fc._folio_get_all("/test", "items", "query", limit=2, no_cql=False,
+                                   headers=custom_headers)
+            )
+
+            assert results == [{"id": "1"}, {"id": "2"}, {"id": "3"}]
+            assert len(calls) == 3
+            for call in calls:
+                assert call["headers"] == custom_headers
+                assert "headers" not in (call["query_params"] or {})
+
+    @pytest.mark.asyncio
+    async def test_folio_get_all_async_applies_headers_to_every_page(self, mock_ecs_check):
+        """Async regression test for the _folio_get_all_async header-ordering bug."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+            calls = []
+
+            async def fake_folio_get_async(path, key=None, query="", query_params=None, **kwargs):
+                calls.append({"query_params": query_params, "headers": kwargs.get("headers")})
+                page_num = len(calls)
+                if page_num == 1:
+                    return [{"id": "1"}, {"id": "2"}]
+                elif page_num == 2:
+                    return [{"id": "3"}]
+                else:
+                    return []
+
+            fc.folio_get_async = fake_folio_get_async
+            custom_headers = {"X-Custom": "value"}
+
+            results = [
+                item
+                async for item in fc._folio_get_all_async(
+                    "/test", "items", "query", limit=2, no_cql=False, headers=custom_headers
+                )
+            ]
+
+            assert results == [{"id": "1"}, {"id": "2"}, {"id": "3"}]
+            assert len(calls) == 3
+            for call in calls:
+                assert call["headers"] == custom_headers
+                assert "headers" not in (call["query_params"] or {})
+
+    def test_folio_get_all_by_id_offset_applies_headers_to_every_page(self, mock_ecs_check):
+        """Regression-guard test: _folio_get_all_by_id_offset already applied headers
+        correctly; lock in that behavior."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+            calls = []
+
+            def fake_folio_get(path, key=None, query="", query_params=None, **kwargs):
+                calls.append({"query_params": query_params, "headers": kwargs.get("headers")})
+                page_num = len(calls)
+                if page_num == 1:
+                    return [{"id": "1"}, {"id": "2"}]
+                else:
+                    return [{"id": "3"}]
+
+            fc.folio_get = fake_folio_get
+            custom_headers = {"X-Custom": "value"}
+
+            results = list(
+                fc._folio_get_all_by_id_offset(
+                    "/test", "items", "query", limit=2, no_cql=False, headers=custom_headers
+                )
+            )
+
+            assert results == [{"id": "1"}, {"id": "2"}, {"id": "3"}]
+            assert len(calls) == 2
+            for call in calls:
+                assert call["headers"] == custom_headers
+                assert "headers" not in (call["query_params"] or {})
+
+    @pytest.mark.asyncio
+    async def test_folio_get_all_by_id_offset_async_applies_headers_to_every_page(
+        self, mock_ecs_check
+    ):
+        """Async regression-guard test for _folio_get_all_by_id_offset_async."""
+        with folio_auth_patcher() as mock_folio_auth:
+            mock_auth_instance = Mock()
+            mock_auth_instance.tenant_id = "test_tenant"
+            mock_folio_auth.return_value = mock_auth_instance
+
+            fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+
+            calls = []
+
+            async def fake_folio_get_async(path, key=None, query="", query_params=None, **kwargs):
+                calls.append({"query_params": query_params, "headers": kwargs.get("headers")})
+                page_num = len(calls)
+                if page_num == 1:
+                    return [{"id": "1"}, {"id": "2"}]
+                else:
+                    return [{"id": "3"}]
+
+            fc.folio_get_async = fake_folio_get_async
+            custom_headers = {"X-Custom": "value"}
+
+            results = [
+                item
+                async for item in fc._folio_get_all_by_id_offset_async(
+                    "/test", "items", "query", limit=2, no_cql=False, headers=custom_headers
+                )
+            ]
+
+            assert results == [{"id": "1"}, {"id": "2"}, {"id": "3"}]
+            assert len(calls) == 2
+            for call in calls:
+                assert call["headers"] == custom_headers
+                assert "headers" not in (call["query_params"] or {})
+
+
 # --- Schema fallback tests for mod-inventory-storage v30+ path changes ---
 
 
