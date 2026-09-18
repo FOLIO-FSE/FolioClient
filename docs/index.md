@@ -17,6 +17,7 @@ authentication, pagination, and data processing.
 * **Performance Optimized**: Experimental orjson support for faster JSON processing
 * **Type Safe**: Full type hints for better IDE support and code reliability
 * **FOLIO Native**: Built specifically for FOLIO's API patterns and conventions
+* **Custom Headers**: Pass a `headers` dict to any request for per-call headers required by specific APIs (e.g. `mod-custom-fields`)
 
 ## Getting Started
 
