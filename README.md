@@ -169,6 +169,25 @@ tasks = [
 results = await asyncio.gather(*tasks)
 ```
 
+### 🆕 **Custom Request Headers (New)**
+Every `folio_get`, `folio_put`, `folio_post`, and `folio_delete` method (and their `_async` and `folio_get_all*` counterparts) accepts an optional `headers` keyword argument. These headers are sent in addition to the standard FOLIO authentication/tenant headers on that single request - they are not stored on the client or applied to any other calls. This is useful for APIs that require additional context via headers, such as `mod-custom-fields`, which scopes custom fields to a module via the `x-okapi-module-id` header:
+
+```Python
+# mod-custom-fields requires an x-okapi-module-id header to scope custom fields
+custom_fields = fc.folio_get(
+    "/custom-fields",
+    key="customFields",
+    headers={"x-okapi-module-id": "mod-users-3.14.2"}
+)
+
+# Also supported on write operations and their async/paginated counterparts
+await fc.folio_post_async(
+    "/custom-fields",
+    payload=new_custom_field,
+    headers={"x-okapi-module-id": "mod-users-3.14.2"}
+)
+```
+
 ## 🔐 Enhanced Authentication & Token Management
 
 ### Automatic Token Lifecycle
