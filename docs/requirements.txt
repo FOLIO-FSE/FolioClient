@@ -125,5 +125,5 @@ typing-extensions==4.15.0
     #   beautifulsoup4
     #   exceptiongroup
     #   pydata-sphinx-theme
-urllib3==2.5.0
+urllib3==2.7.0
     # via requests
