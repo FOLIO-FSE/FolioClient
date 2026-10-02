@@ -1600,7 +1600,7 @@ class FolioClient:
             ...     process(item)
 
         """
-        if not no_cql and (not query or SORTBY_ID not in query):
+        if not no_cql and (not query or SORTBY_ID in query):
             query = self.prepare_id_offset_query(query, self.cql_all)
             async for item in self._folio_get_all_by_id_offset_async(
                 path, key, query, limit, no_cql, **kwargs
