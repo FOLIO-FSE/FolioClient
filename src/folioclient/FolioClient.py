@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime
 from datetime import timezone as tz
-from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Union, cast, TYPE_CHECKING
+from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, cast, TYPE_CHECKING
 from urllib.parse import urljoin
 from warnings import warn
 
@@ -1210,7 +1210,7 @@ class FolioClient:
         return bool(self.ecs_consortium)
 
     @cached_property
-    def ecs_consortium(self) -> Union[Dict[str, Any], None]:
+    def ecs_consortium(self) -> Dict[str, Any] | None:
         """
         Property that returns the ECS consortia object for the current tenant.
         """
