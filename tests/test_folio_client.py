@@ -1326,6 +1326,94 @@ class TestCustomHeaders:
                 assert "headers" not in (call["query_params"] or {})
 
 
+ID_OFFSET = "_folio_get_all_by_id_offset"
+OFFSET = "_folio_get_all"
+
+
+@contextmanager
+def _get_all_dispatch_spy(is_async):
+    """Yield (fc, calls) with both pagination strategies replaced by spies that record
+    (strategy_name, query) and yield nothing."""
+    with folio_auth_patcher():
+        fc = FolioClient("https://example.com", "test_tenant", "user", "pass")
+        calls = []
+
+        def make_spy(name):
+            if is_async:
+                async def spy(path, key, query, *args, **kwargs):
+                    calls.append((name, query))
+                    return
+                    yield
+            else:
+                def spy(path, key, query, *args, **kwargs):
+                    calls.append((name, query))
+                    return iter([])
+            return spy
+
+        for name in (ID_OFFSET, OFFSET):
+            attr = name + "_async" if is_async else name
+            setattr(fc, attr, make_spy(attr))
+        yield fc, calls
+
+
+def _run_get_all(fc, **kwargs):
+    return list(fc.folio_get_all("/test", "items", **kwargs))
+
+
+async def _run_get_all_async(fc, **kwargs):
+    return [item async for item in fc.folio_get_all_async("/test", "items", **kwargs)]
+
+
+@patch.object(FolioClient, '_initial_ecs_check')
+class TestGetAllStrategyDispatch:
+    """folio_get_all / folio_get_all_async must pick the same pagination strategy:
+    ID-offset when no query is given or the query sorts by id, plain offset otherwise."""
+
+    def test_no_query_uses_id_offset(self, mock_ecs_check):
+        with _get_all_dispatch_spy(is_async=False) as (fc, calls):
+            _run_get_all(fc)
+            assert calls == [(ID_OFFSET, f"{fc.cql_all} sortBy id")]
+
+    @pytest.mark.asyncio
+    async def test_no_query_uses_id_offset_async(self, mock_ecs_check):
+        with _get_all_dispatch_spy(is_async=True) as (fc, calls):
+            await _run_get_all_async(fc)
+            assert calls == [(ID_OFFSET + "_async", f"{fc.cql_all} sortBy id")]
+
+    def test_sort_by_id_query_uses_id_offset(self, mock_ecs_check):
+        with _get_all_dispatch_spy(is_async=False) as (fc, calls):
+            _run_get_all(fc, query="title=foo sortBy id")
+            assert calls == [(ID_OFFSET, "title=foo sortBy id")]
+
+    @pytest.mark.asyncio
+    async def test_sort_by_id_query_uses_id_offset_async(self, mock_ecs_check):
+        with _get_all_dispatch_spy(is_async=True) as (fc, calls):
+            await _run_get_all_async(fc, query="title=foo sortBy id")
+            assert calls == [(ID_OFFSET + "_async", "title=foo sortBy id")]
+
+    def test_other_query_uses_offset(self, mock_ecs_check):
+        with _get_all_dispatch_spy(is_async=False) as (fc, calls):
+            _run_get_all(fc, query="title=foo")
+            assert calls == [(OFFSET, "title=foo")]
+
+    @pytest.mark.asyncio
+    async def test_other_query_uses_offset_async(self, mock_ecs_check):
+        with _get_all_dispatch_spy(is_async=True) as (fc, calls):
+            await _run_get_all_async(fc, query="title=foo")
+            assert calls == [(OFFSET + "_async", "title=foo")]
+
+    def test_no_cql_uses_offset_even_with_sort_by_id(self, mock_ecs_check):
+        with _get_all_dispatch_spy(is_async=False) as (fc, calls):
+            _run_get_all(fc, query="x sortBy id", no_cql=True)
+            assert [name for name, _ in calls] == [OFFSET]
+
+    @pytest.mark.asyncio
+    async def test_no_cql_uses_offset_even_with_sort_by_id_async(self, mock_ecs_check):
+        with _get_all_dispatch_spy(is_async=True) as (fc, calls):
+            await _run_get_all_async(fc, query="x sortBy id", no_cql=True)
+            assert [name for name, _ in calls] == [OFFSET + "_async"]
+
+
 # --- Schema fallback tests for mod-inventory-storage v30+ path changes ---
 
 
