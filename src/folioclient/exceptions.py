@@ -15,7 +15,6 @@ from typing import (
     Dict,
     Type,
     Optional,
-    Union,
     cast,
     overload,
     Awaitable,
@@ -396,7 +395,7 @@ def _get_connection_error_message(
 
 
 def _create_folio_exception(
-    original_error: Union[httpx.RequestError, httpx.HTTPStatusError],
+    original_error: httpx.RequestError | httpx.HTTPStatusError,
 ) -> FolioError:
     """Create appropriate FOLIO exception based on the original httpx error."""
 
