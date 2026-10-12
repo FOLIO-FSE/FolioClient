@@ -285,23 +285,69 @@ def test_context_manager_closes_client():
 @patch.object(FolioClient, '_initial_ecs_check')
 def test_context_manager_logs_out_on_exit(mock_ecs_check):
     with folio_auth_patcher():
+        calls = []
+
         mock_logout_response = Mock()
         mock_logout_response.raise_for_status.return_value = None
 
         mock_httpx_client = Mock()
         mock_httpx_client.is_closed = False
-        mock_httpx_client.post.return_value = mock_logout_response
+        mock_httpx_client.post.side_effect = lambda *a, **kw: (
+            calls.append("post") or mock_logout_response
+        )
         mock_httpx_client.close = Mock()
 
         logout_url = urljoin("https://example.com", "authn/logout")
 
         with patch.object(FolioClient, 'get_folio_http_client', return_value=mock_httpx_client):
             with FolioClient("https://example.com", "tenant", "user", "pass") as fc:
-                fc.folio_auth.reset_tenant_id = Mock()
+                fc.folio_auth.reset_tenant_id = Mock(
+                    side_effect=lambda: calls.append("reset_tenant_id")
+                )
 
+            # The tenant must be reset before logout so it targets the original tenant
+            assert calls == ["reset_tenant_id", "post"]
             mock_httpx_client.post.assert_called_once_with(logout_url)
             mock_httpx_client.close.assert_called_once()
-            fc.folio_auth.reset_tenant_id.assert_called_once()
+
+
+@patch.object(FolioClient, '_initial_ecs_check')
+async def test_async_context_manager_resets_tenant_before_logout(mock_ecs_check):
+    """In an ECS context the tenant may have been switched to a member tenant;
+    __aexit__ must reset it to the original tenant *before* posting to logout."""
+    with folio_auth_patcher():
+        calls = []
+
+        mock_logout_response = Mock()
+        mock_logout_response.raise_for_status.return_value = None
+
+        async def record_post(url, *args, **kwargs):
+            calls.append("post")
+            return mock_logout_response
+
+        mock_async_client = MagicMock()
+        mock_async_client.is_closed = False
+        mock_async_client.post = AsyncMock(side_effect=record_post)
+        mock_async_client.aclose = AsyncMock()
+
+        mock_sync_client = Mock()
+        mock_sync_client.is_closed = False
+
+        logout_url = urljoin("https://example.com", "authn/logout")
+
+        with patch.object(
+            FolioClient, 'get_folio_http_client_async', return_value=mock_async_client
+        ), patch.object(FolioClient, 'get_folio_http_client', return_value=mock_sync_client):
+            async with FolioClient("https://example.com", "tenant", "user", "pass") as fc:
+                fc.folio_auth.reset_tenant_id = Mock(
+                    side_effect=lambda: calls.append("reset_tenant_id")
+                )
+
+            assert calls == ["reset_tenant_id", "post"]
+            mock_async_client.post.assert_awaited_once_with(logout_url)
+            mock_async_client.aclose.assert_awaited_once()
+            mock_sync_client.close.assert_called_once()
+            assert fc.is_closed is True
 
 
 @pytest.mark.asyncio
