@@ -710,12 +710,16 @@ class FolioClient:
         """
         try:
             resp = self.folio_get(f"/_/proxy/tenants/{self.tenant_id}/modules")
+            logger.debug("Retrieved modules from /_proxy/tenants/%s/modules", self.tenant_id)
         except httpx.HTTPError:
-            entitlements = self.folio_get(f"/entitlements/{self.tenant_id}/applications")
+            entitlements = self.folio_get(
+                f"/entitlements/{self.tenant_id}/applications", query_params={"limit": 500}
+            )
+            logger.debug("Retrieved modules from /entitlements/%s/applications", self.tenant_id)
             resp = []
             for app in entitlements["applicationDescriptors"]:
-                for md in app["modules"]:
-                    resp.append(md)
+                resp.extend(app.get("modules", []))
+                resp.extend(app.get("uiModules", []))
         return [a["id"] for a in resp]
 
     @cached_property
