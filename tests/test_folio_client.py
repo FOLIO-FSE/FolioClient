@@ -1752,3 +1752,41 @@ class TestGetItemSchema:
             with patch.object(fc, 'get_from_github', side_effect=error_500):
                 with pytest.raises(httpx.HTTPStatusError):
                     fc.get_item_schema()
+
+
+class TestModuleVersionsFallback:
+    """module_versions falls back to the entitlements API when the proxy endpoint fails."""
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_module_versions_proxy_success(self, mock_ecs_check):
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            with patch.object(
+                fc, "folio_get", return_value=[{"id": "mod-a-1.0.0"}, {"id": "mod-b-2.0.0"}]
+            ) as mock_get:
+                assert fc.module_versions == ["mod-a-1.0.0", "mod-b-2.0.0"]
+                mock_get.assert_called_once_with("/_/proxy/tenants/tenant/modules")
+
+    @patch.object(FolioClient, '_initial_ecs_check')
+    def test_module_versions_entitlements_fallback_includes_ui_modules(self, mock_ecs_check):
+        entitlements = {
+            "applicationDescriptors": [
+                {
+                    "modules": [{"id": "mod-users-19.0.0"}],
+                    "uiModules": [{"id": "folio_users-11.0.0"}],
+                },
+                {"modules": [{"id": "mod-inventory-1.0.0"}]},
+            ]
+        }
+        with folio_auth_patcher():
+            fc = FolioClient("https://example.com", "tenant", "user", "pass")
+            with patch.object(
+                fc, "folio_get", side_effect=[httpx.HTTPError("403"), entitlements]
+            ) as mock_get:
+                assert fc.module_versions == [
+                    "mod-users-19.0.0",
+                    "folio_users-11.0.0",
+                    "mod-inventory-1.0.0",
+                ]
+                assert mock_get.call_args_list[1].args == ("/entitlements/tenant/applications",)
+                assert mock_get.call_args_list[1].kwargs == {"query_params": {"limit": 500}}
