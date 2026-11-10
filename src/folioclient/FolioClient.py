@@ -64,6 +64,11 @@ except (TypeError, ValueError):
     HTTPX_TIMEOUT = None
 
 RAML_UTIL_URL = "https://raw.githubusercontent.com/folio-org/raml/raml1.0"
+# Matches a relative raml-util reference with up to 10 leading "../" segments (the bound
+# keeps the repetition from being flagged as super-linear; real refs have at most ~5).
+# The lookbehind skips occurrences that are part of a longer path or URL, so text that
+# already contains RAML_UTIL_URL is left untouched (the rewrite is idempotent).
+_RAML_UTIL_REF_RE = re.compile(r"(?<![\w/.:-])(?:\.\./){0,100}raml-util")
 
 USER_AGENT_STRING = "Folio Client (https://github.com/FOLIO-FSE/FolioClient)"
 
@@ -2456,11 +2461,7 @@ class FolioClient:
             follow_redirects=True,
         )
         schema_response.raise_for_status()
-        fix_refs = (
-            schema_response.text.replace("../../raml-util", RAML_UTIL_URL)
-            .replace("../raml-util", RAML_UTIL_URL)
-            .replace("raml-util", RAML_UTIL_URL)
-        )
+        fix_refs = _RAML_UTIL_REF_RE.sub(lambda _: RAML_UTIL_URL, schema_response.text)
         if schema_url.endswith("yaml"):
             return to_json_schema(yaml.safe_load(fix_refs))
         elif schema_url.endswith("json") or schema_url.endswith("schema"):

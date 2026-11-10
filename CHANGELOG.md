@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+- `FolioClient.fetch_github_schema` now rewrites `raml-util` references with any number of leading `../` segments (e.g. `../../../raml-util/...` in folio-org/acq-models) and no longer corrupts text that already contains the absolute raml-util URL.
+
+### Added
+- Network tests (`integration` marker) that fully dereference acq-models schemas via the submodule SHA pinned by mod-orders, and the latest-release inventory (instance, holdings, item) and user schemas, to detect upstream changes that break schema resolution.
+
+### Changed
+- Existing live mod-inventory-storage schema tests now force full `$ref` resolution instead of only checking for top-level `properties`.
+
 ## v1.0.0
 
 ### Added

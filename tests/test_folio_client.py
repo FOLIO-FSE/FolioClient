@@ -1477,6 +1477,7 @@ class TestInventoryStorageSchemaLive:
             schema = fc.get_instance_json_schema()
             assert schema is not None
             assert "properties" in schema
+            _fully_resolve(schema)
 
     @patch.object(FolioClient, '_initial_ecs_check')
     def test_get_instance_json_schema_v30(self, mock_ecs_check):
@@ -1487,6 +1488,7 @@ class TestInventoryStorageSchemaLive:
             schema = fc.get_instance_json_schema()
             assert schema is not None
             assert "properties" in schema
+            _fully_resolve(schema)
 
     @patch.object(FolioClient, '_initial_ecs_check')
     def test_get_holdings_schema_pre_v30(self, mock_ecs_check):
@@ -1497,6 +1499,7 @@ class TestInventoryStorageSchemaLive:
             schema = fc.get_holdings_schema()
             assert schema is not None
             assert "properties" in schema
+            _fully_resolve(schema)
 
     @patch.object(FolioClient, '_initial_ecs_check')
     def test_get_holdings_schema_v30(self, mock_ecs_check):
@@ -1507,6 +1510,7 @@ class TestInventoryStorageSchemaLive:
             schema = fc.get_holdings_schema()
             assert schema is not None
             assert "properties" in schema
+            _fully_resolve(schema)
 
     @patch.object(FolioClient, '_initial_ecs_check')
     def test_get_item_schema_pre_v30(self, mock_ecs_check):
@@ -1517,6 +1521,7 @@ class TestInventoryStorageSchemaLive:
             schema = fc.get_item_schema()
             assert schema is not None
             assert "properties" in schema
+            _fully_resolve(schema)
 
     @patch.object(FolioClient, '_initial_ecs_check')
     def test_get_item_schema_v30(self, mock_ecs_check):
@@ -1527,6 +1532,7 @@ class TestInventoryStorageSchemaLive:
             schema = fc.get_item_schema()
             assert schema is not None
             assert "properties" in schema
+            _fully_resolve(schema)
 
 
 class TestGetInstanceJsonSchema:
@@ -1792,3 +1798,123 @@ class TestModuleVersionsFallback:
                     limit=500,
                     no_cql=True,
                 )
+
+
+# --- fetch_github_schema raml-util rewriting ---------------------------------
+import jsonref
+from folioclient.FolioClient import RAML_UTIL_URL
+
+
+def _fully_resolve(schema):
+    """Force every lazy jsonref $ref to load (jsonref resolves on access), so broken refs raise."""
+    return json.dumps(schema, default=lambda o: o.__subject__ if hasattr(o, "__subject__") else str(o))
+
+
+def _mock_get(responses):
+    def _get(url, *args, **kwargs):
+        resp = Mock()
+        resp.text = responses[url]
+        resp.raise_for_status = Mock()
+        return resp
+
+    return _get
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "../raml-util/x",
+        "../../raml-util/x",
+        "../../../raml-util/x",
+        "../../../../raml-util/x",
+        "raml-util/x",
+    ],
+)
+def test_fetch_github_schema_rewrites_raml_util(ref):
+    url = "https://raw.githubusercontent.com/o/r/sha/s.json"
+    body = json.dumps({"$ref": ref})
+    with patch("folioclient.FolioClient.httpx.get", _mock_get({url: body})):
+        assert FolioClient.fetch_github_schema(url) == {"$ref": f"{RAML_UTIL_URL}/x"}
+
+
+def test_fetch_github_schema_is_idempotent():
+    url = "https://raw.githubusercontent.com/o/r/sha/s.json"
+    original = {"$ref": f"{RAML_UTIL_URL}/schemas/tags.schema", "d": "see raml-util docs"}
+    body = json.dumps(original).replace("see raml-util docs", "see /raml-util docs")
+    with patch("folioclient.FolioClient.httpx.get", _mock_get({url: body})):
+        result = FolioClient.fetch_github_schema(url)
+    assert result["$ref"] == original["$ref"]
+    assert result["d"] == "see /raml-util docs"
+
+
+def test_fetch_github_schema_dereferences_deep_raml_util_ref():
+    base = "https://raw.githubusercontent.com/folio-org/acq-models/sha/mod-orders-storage/schemas/po.json"
+    tags = f"{RAML_UTIL_URL}/schemas/tags.schema"
+    responses = {
+        base: json.dumps({"type": "object", "properties": {"tags": {"$ref": "../../../raml-util/schemas/tags.schema"}}}),
+        tags: json.dumps({"type": "object", "properties": {"tagList": {"type": "array"}}}),
+    }
+    with patch("folioclient.FolioClient.httpx.get", _mock_get(responses)):
+        schema = FolioClient.fetch_github_schema(base)
+        result = jsonref.replace_refs(
+            schema, loader=FolioClient.fetch_github_schema, base_uri=base, proxies=False
+        )
+    assert result["properties"]["tags"]["properties"]["tagList"] == {"type": "array"}
+
+
+# Network tests: acq-models is a git submodule of the acq modules, so raw.githubusercontent
+# can't reach its files through the parent repo. Look up the submodule SHA that mod-orders
+# currently pins, so upstream changes to how schemas are built surface as failures here.
+@pytest.fixture(scope="module")
+def acq_models_sha():
+    resp = httpx.get(
+        "https://api.github.com/repos/folio-org/mod-orders/contents/ramls/acq-models",
+        headers=FolioClient.get_github_request_headers(),
+        follow_redirects=True,
+    )
+    resp.raise_for_status()
+    info = resp.json()
+    assert info["type"] == "submodule"
+    return info["sha"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "path",
+    [
+        "mod-orders/schemas/composite_purchase_order.json",
+        "mod-orders-storage/schemas/purchase_order.json",
+        "mod-orgs/schemas/organization.json",
+    ],
+)
+def test_acq_models_schemas_dereference(acq_models_sha, path):
+    url = f"https://raw.githubusercontent.com/folio-org/acq-models/{acq_models_sha}/{path}"
+    schema = FolioClient.fetch_github_schema(url)
+    result = jsonref.replace_refs(
+        schema, loader=FolioClient.fetch_github_schema, base_uri=url, proxies=False
+    )
+    assert result["properties"]
+    _fully_resolve(result)
+
+
+# Latest-release network tests: a SNAPSHOT module version makes get_module_version return
+# None, so get_from_github resolves the latest GitHub release. Catches upstream changes to
+# schema layout or ref style that break our resolution.
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "module,method",
+    [
+        ("mod-inventory-storage", "get_instance_json_schema"),
+        ("mod-inventory-storage", "get_holdings_schema"),
+        ("mod-inventory-storage", "get_item_schema"),
+        ("mod-users", "get_user_schema"),
+    ],
+)
+@patch.object(FolioClient, "_initial_ecs_check")
+def test_latest_release_schemas_dereference(mock_ecs_check, module, method):
+    with folio_auth_patcher():
+        fc = FolioClient("https://example.com", "tenant", "user", "pass")
+        fc.__dict__["module_versions"] = [f"{module}-99.0.0-SNAPSHOT"]
+        schema = getattr(fc, method)()
+    assert schema["properties"]
+    _fully_resolve(schema)
