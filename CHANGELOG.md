@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `FolioClient.fetch_github_schema` now rewrites `raml-util` references with any number of leading `../` segments (e.g. `../../../raml-util/...` in folio-org/acq-models) and no longer corrupts text that already contains the absolute raml-util URL.
+- `get_from_github` / `get_latest_from_github` returned non-deterministic results for large schema trees (e.g. acq-models `composite_purchase_order.json`): a relative `$ref` could resolve to the content of an unrelated file. Root cause is a bug in jsonref 1.1.0 (`replace_refs(..., proxies=False)`): `_walk_refs` memoizes by `id()` while replacing proxies, the replaced proxies are freed immediately, and their ids get reused by later nodes, which then receive the earlier node's result. Dereferencing now uses a small internal resolver (`folioclient._schema_refs.dereference`) instead of jsonref.
+
+### Changed
+- Schema dereferencing no longer uses jsonref. Behavior differences: results are plain nested `dict`/`list` objects (not jsonref proxies); each document is fetched once and every `$ref` is resolved against the URL of the document containing it; sibling keys next to a `$ref` (e.g. `description`) are now merged over the referenced schema (previously dropped); circular refs are left as `{"$ref": "<absolute URL>"}` markers instead of producing self-referential objects; load failures propagate as the original `httpx` exceptions instead of `jsonref.JsonRefError`.
+- Existing live mod-inventory-storage schema tests now force full `$ref` resolution instead of only checking for top-level `properties`.
 
 ### Added
 - Network tests (`integration` marker) that fully dereference acq-models schemas via the submodule SHA pinned by mod-orders, and the latest-release inventory (instance, holdings, item) and user schemas, to detect upstream changes that break schema resolution.
-
-### Changed
-- Existing live mod-inventory-storage schema tests now force full `$ref` resolution instead of only checking for top-level `properties`.
 
 ## v1.0.0
 
