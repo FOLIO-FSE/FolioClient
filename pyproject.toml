@@ -1,6 +1,6 @@
 [project]
 name = "folioclient"
-version = "1.0.16"
+version = "1.1.0"
 description = "An API wrapper over the FOLIO LSP API Suite (Formerly OKAPI)."
 authors = [
     { name = "Theodor Tolstoy", email = "github.teddes@tolstoy.se" },
@@ -9,10 +9,9 @@ authors = [
 license = "MIT"
 readme = "README.md"
 keywords = ["FOLIO", "ILS", "LSP", "Library Systems", "MARC21", "Library data"]
-requires-python = ">=3.10,<4.0"
+requires-python = ">=3.11,<4.0"
 classifiers = [
     "Development Status :: 5 - Production/Stable",
-    "License :: OSI Approved :: MIT License",
     
     # Audience
     "Intended Audience :: Developers",
@@ -21,11 +20,11 @@ classifiers = [
 
     # Supported python versions
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
 ]
 dependencies = [
     "httpx>=0.28.1",
@@ -64,7 +63,7 @@ orjson = ["orjson>=3.11.3,<4.0.0"]
 
 # Build
 [build-system]
-requires = ["uv_build>=0.9.3,<0.13.0"]
+requires = ["uv_build>=0.9.3,<0.14.0"]
 build-backend = "uv_build"
 
 # Linting
@@ -100,7 +99,7 @@ exclude = [
 ]
 
 indent-width = 4
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["B", "B9", "C", "E", "F", "S", "W"]

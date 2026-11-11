@@ -5,18 +5,123 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## v1.1.0
+
+### Removed
+- Dropped support for Python 3.10; the minimum supported version is now Python 3.11.
 
 ### Fixed
 - `FolioClient.fetch_github_schema` now rewrites `raml-util` references with any number of leading `../` segments (e.g. `../../../raml-util/...` in folio-org/acq-models) and no longer corrupts text that already contains the absolute raml-util URL.
 - `get_from_github` / `get_latest_from_github` returned non-deterministic results for large schema trees (e.g. acq-models `composite_purchase_order.json`): a relative `$ref` could resolve to the content of an unrelated file. Root cause is a bug in jsonref 1.1.0 (`replace_refs(..., proxies=False)`): `_walk_refs` memoizes by `id()` while replacing proxies, the replaced proxies are freed immediately, and their ids get reused by later nodes, which then receive the earlier node's result. Dereferencing now uses a small internal resolver (`folioclient._schema_refs.dereference`) instead of jsonref.
 
 ### Changed
+- Widened the `uv_build` build requirement to `>=0.9.3,<0.14.0` and removed the deprecated MIT license classifier (the PEP 639 `license = "MIT"` field is already set).
 - Schema dereferencing no longer uses jsonref. Behavior differences: results are plain nested `dict`/`list` objects (not jsonref proxies); each document is fetched once and every `$ref` is resolved against the URL of the document containing it; sibling keys next to a `$ref` (e.g. `description`) are now merged over the referenced schema (previously dropped); circular refs are left as `{"$ref": "<absolute URL>"}` markers instead of producing self-referential objects; load failures propagate as the original `httpx` exceptions instead of `jsonref.JsonRefError`.
 - Existing live mod-inventory-storage schema tests now force full `$ref` resolution instead of only checking for top-level `properties`.
 
 ### Added
+- Python 3.15 is now tested in CI and listed in the package classifiers.
 - Network tests (`integration` marker) that fully dereference acq-models schemas via the submodule SHA pinned by mod-orders, and the latest-release inventory (instance, holdings, item) and user schemas, to detect upstream changes that break schema resolution.
+
+
+## v1.0.16
+
+### Fixed
+- `module_versions` entitlements fallback now returns the full module list: it pages through all of the tenant's applications with `folio_get_all` (500 per request) and includes `uiModules`, so restricted users get the same list as the proxy endpoint. Fixes [#151](https://github.com/FOLIO-FSE/FolioClient/issues/151).
+
+## v1.0.15
+
+### Fixed
+- Logout on async context-manager exit no longer fails in an ECS context.
+
+## v1.0.14
+
+### Changed
+- `folio_get_all_async` now behaves like `folio_get_all` (see [#148](https://github.com/FOLIO-FSE/FolioClient/issues/148)).
+- Type annotations use modern `X | Y` union syntax.
+
+## v1.0.13
+
+### Added
+- Custom HTTP headers on requests: `folio_get`/`put`/`post`/`delete`, their async variants, and the pagination helpers accept a `headers` dict that is merged with the client's default auth headers. Documented in the README and quickstart.
+
+## v1.0.12
+
+### Fixed
+- Token expiration parsing now works on Python 3.10 (FOLIO's trailing-`Z` timestamps are parsed with `dateutil` instead of `datetime.fromisoformat`).
+- Async authentication is serialized with a per-event-loop `asyncio.Lock`. The previous `threading.RLock` provided no mutual exclusion between coroutines, so N concurrent flows produced N logins.
+- A 401 is now treated as authoritative: the client re-authenticates unless another caller has already replaced the token, instead of only when the token looked locally expired.
+- The 401 retry reads the response body before raising.
+- 403 retries are now effective: multipart uploads are replayable and a short delay is added before retrying. FOLIO's Keycloak integration frequently translates transient backend errors into 403s. The delay is documented.
+
+## v1.0.11
+
+### Added
+- Cached property for service points. Fixes [#142](https://github.com/FOLIO-FSE/FolioClient/issues/142).
+
+## v1.0.10
+
+### Fixed
+- The authentication response is read before a 403 exception is raised.
+
+## v1.0.9
+
+### Changed
+- Improved type hints for decorators and exceptions using overloads for better compatibility.
+
+## v1.0.8
+
+### Fixed
+- `FolioAuth` handles transient 403 Forbidden responses with retry logic; a repeated 403 on retry no longer raises a custom exception.
+
+### Added
+- `bugfest-next` integration-test configuration.
+
+## v1.0.7
+
+### Fixed
+- Schema fallback for the mod-inventory-storage schema path changes in v30.0.0 and later.
+
+## v1.0.6
+
+### Fixed
+- Connection-error exception translation was handled incorrectly.
+
+## v1.0.5
+
+### Fixed
+- Logout failed for ECS tenants; the tenant ID is now reset on logout.
+
+## v1.0.4
+
+### Changed
+- `folio_post` / `folio_put` helpers accept a `dict` or `str` payload; `prepare_payload` raises a clear error for other types.
+- More debug logging in `FolioAuth` (tenant ID setting and authentication flows).
+
+### Fixed
+- `should_retry_auth_error` checks that the response attribute exists before reading the status code, along with other retry-decorator fixes.
+
+## v1.0.3
+
+### Added
+- Docstrings for the `tenant_id` and `refresh_token` properties.
+- Python 3 trove classifier.
+
+## v1.0.2.post1
+
+### Changed
+- Documentation and packaging only: docs requirements updates and a stable docs branch workflow for Read the Docs.
+
+## v1.0.2
+
+### Changed
+- Added package classifiers and updated build-system requirements.
+- Renamed the logout exception handler to a private method.
+
+## v1.0.1
+
+### Changed
+- `FolioAuth` is now created in `FolioClient.login()` instead of `__init__`, so tests can patch `login()` and supply a mock `FolioAuth` rather than mocking the whole class.
 
 ## v1.0.0
 

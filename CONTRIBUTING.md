@@ -23,7 +23,7 @@ By participating in this project, you agree to abide by the [FOLIO Community Cod
 
 ### Prerequisites
 
-- Python 3.10 or higher (Python 3.13 recommended)
+- Python 3.11 or higher (Python 3.14 recommended)
 - [uv](https://github.com/astral-sh/uv) for dependency management
 - Git for version control
 - A FOLIO system for testing (optional, but recommended for comprehensive testing)
