@@ -64,7 +64,7 @@ except (TypeError, ValueError):
     HTTPX_TIMEOUT = None
 
 RAML_UTIL_URL = "https://raw.githubusercontent.com/folio-org/raml/raml1.0"
-# Matches a relative raml-util reference with up to 10 leading "../" segments (the bound
+# Matches a relative raml-util reference with up to 100 leading "../" segments (the bound
 # keeps the repetition from being flagged as super-linear; real refs have at most ~5).
 # The lookbehind skips occurrences that are part of a longer path or URL, so text that
 # already contains RAML_UTIL_URL is left untouched (the rewrite is idempotent).
