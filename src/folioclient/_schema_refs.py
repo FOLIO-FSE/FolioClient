@@ -40,6 +40,56 @@ def _resolve_pointer(document: Any, pointer: str, uri: str) -> Any:
     return node
 
 
+class _Dereferencer:
+    def __init__(self, schema: Any, base_uri: str, loader: Loader) -> None:
+        self.root_uri = urldefrag(base_uri)[0]
+        self.loader = loader
+        self.documents: dict[str, Any] = {self.root_uri: schema}
+        self.memo: dict[tuple[str, str], Any] = {}
+        self.in_progress: list[tuple[str, str]] = [(self.root_uri, "")]
+        # Circular refs emitted so far; results containing one aren't memoized.
+        self.cycles_cut = 0
+
+    def load(self, uri: str) -> Any:
+        if uri not in self.documents:
+            self.documents[uri] = self.loader(uri)
+        return self.documents[uri]
+
+    def walk(self, node: Any, doc_uri: str) -> Any:
+        if isinstance(node, list):
+            return [self.walk(item, doc_uri) for item in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if not isinstance(ref, str):
+            return {key: self.walk(value, doc_uri) for key, value in node.items()}
+
+        target_uri, pointer = urldefrag(urljoin(doc_uri, ref))
+        siblings = {k: self.walk(v, doc_uri) for k, v in node.items() if k != "$ref"}
+        resolved = self.expand((target_uri, pointer), siblings)
+        if siblings and isinstance(resolved, dict):
+            resolved = {**resolved, **siblings}
+        return resolved
+
+    def expand(self, key: tuple[str, str], siblings: dict[str, Any]) -> Any:
+        target_uri, pointer = key
+        if key in self.in_progress:
+            self.cycles_cut += 1
+            return {"$ref": f"{target_uri}#{pointer}" if pointer else target_uri, **siblings}
+        if key in self.memo:
+            return copy.deepcopy(self.memo[key])
+        before = self.cycles_cut
+        self.in_progress.append(key)
+        try:
+            target = _resolve_pointer(self.load(target_uri), pointer, target_uri)
+            resolved = self.walk(target, target_uri)
+        finally:
+            self.in_progress.pop()
+        if self.cycles_cut == before:  # nothing circular was cut off inside, so it's reusable
+            self.memo[key] = copy.deepcopy(resolved)
+        return resolved
+
+
 def dereference(schema: Any, base_uri: str, loader: Loader) -> Any:
     """Return a copy of ``schema`` with all ``$ref`` objects replaced by what they point to.
 
@@ -48,47 +98,5 @@ def dereference(schema: Any, base_uri: str, loader: Loader) -> Any:
         base_uri: Absolute URL of ``schema``; relative refs are resolved against it.
         loader: Callable taking an absolute URL and returning the parsed document.
     """
-    root_uri = urldefrag(base_uri)[0]
-    documents: dict[str, Any] = {root_uri: schema}
-    memo: dict[tuple[str, str], Any] = {}
-    in_progress: list[tuple[str, str]] = [(root_uri, "")]
-    cycles_cut = 0  # circular refs emitted so far; results containing one aren't memoized
-
-    def load(uri: str) -> Any:
-        if uri not in documents:
-            documents[uri] = loader(uri)
-        return documents[uri]
-
-    def walk(node: Any, doc_uri: str) -> Any:
-        if isinstance(node, list):
-            return [walk(item, doc_uri) for item in node]
-        if not isinstance(node, dict):
-            return node
-        ref = node.get("$ref")
-        if not isinstance(ref, str):
-            return {key: walk(value, doc_uri) for key, value in node.items()}
-
-        target_uri, pointer = urldefrag(urljoin(doc_uri, ref))
-        key = (target_uri, pointer)
-        siblings = {k: walk(v, doc_uri) for k, v in node.items() if k != "$ref"}
-        if key in in_progress:
-            nonlocal cycles_cut
-            cycles_cut += 1
-            return {"$ref": f"{target_uri}#{pointer}" if pointer else target_uri, **siblings}
-        if key in memo:
-            resolved = copy.deepcopy(memo[key])
-        else:
-            before = cycles_cut
-            in_progress.append(key)
-            try:
-                target = _resolve_pointer(load(target_uri), pointer, target_uri)
-                resolved = walk(target, target_uri)
-            finally:
-                in_progress.pop()
-            if cycles_cut == before:  # nothing circular was cut off inside, so it's reusable
-                memo[key] = copy.deepcopy(resolved)
-        if siblings and isinstance(resolved, dict):
-            resolved = {**resolved, **siblings}
-        return resolved
-
-    return walk(schema, root_uri)
+    resolver = _Dereferencer(schema, base_uri, loader)
+    return resolver.walk(schema, resolver.root_uri)
