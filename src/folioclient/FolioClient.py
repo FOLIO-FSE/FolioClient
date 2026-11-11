@@ -12,11 +12,11 @@ from urllib.parse import urljoin
 from warnings import warn
 
 import httpx
-import jsonref
 import yaml
 from openapi_schema_to_json_schema import to_json_schema
 
 from folioclient._httpx import FolioAuth, FolioConnectionParameters
+from folioclient._schema_refs import dereference
 from folioclient.cached_property import cached_property
 from folioclient.decorators import (
     folio_retry_on_auth_error,
@@ -2386,12 +2386,7 @@ class FolioClient:
         latest_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{latest_tag}/{filepath}"
         # print(latest_path)
         schema = FolioClient.fetch_github_schema(latest_path)
-        dereferenced = jsonref.replace_refs(
-            schema,
-            loader=FolioClient.fetch_github_schema,
-            base_uri=latest_path,
-            proxies=False,
-        )
+        dereferenced = dereference(schema, latest_path, FolioClient.fetch_github_schema)
         return dereferenced
 
     def get_from_github(self, owner, repo, filepath: str, ssl_verify=True) -> Dict[str, Any]:  # noqa: S107
@@ -2429,12 +2424,7 @@ class FolioClient:
             f_path = f"https://raw.githubusercontent.com/{owner}/{repo}/{version}/{filepath}"
         # print(latest_path)
         schema = FolioClient.fetch_github_schema(f_path)
-        dereferenced = jsonref.replace_refs(
-            schema,
-            loader=FolioClient.fetch_github_schema,
-            base_uri=f_path,
-            proxies=False,
-        )
+        dereferenced = dereference(schema, f_path, FolioClient.fetch_github_schema)
         return dereferenced
 
     @staticmethod
@@ -2442,7 +2432,7 @@ class FolioClient:
         """
         Fixes relative $ref references in the schema that refer to submodules,
         like raml-util.This method can be used as a loader in
-        `jsonref.replace_refs`.
+        `folioclient._schema_refs.dereference`.
 
         Params
             schema_url: The URL of the schema to fix.

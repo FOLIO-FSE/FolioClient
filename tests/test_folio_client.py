@@ -1801,13 +1801,28 @@ class TestModuleVersionsFallback:
 
 
 # --- fetch_github_schema raml-util rewriting ---------------------------------
-import jsonref
 from folioclient.FolioClient import RAML_UTIL_URL
+from folioclient._schema_refs import dereference
 
 
 def _fully_resolve(schema):
-    """Force every lazy jsonref $ref to load (jsonref resolves on access), so broken refs raise."""
-    return json.dumps(schema, default=lambda o: o.__subject__ if hasattr(o, "__subject__") else str(o))
+    """Assert the schema is JSON serializable and has no unresolved relative $refs.
+
+    (Circular refs are left as absolute-URL "$ref" markers, which is allowed.)
+    """
+    def check(node):
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            assert not isinstance(ref, str) or ref.startswith("http"), f"unresolved $ref: {ref}"
+            for v in node.values():
+                check(v)
+        elif isinstance(node, list):
+            for v in node:
+                check(v)
+
+    json.dumps(schema)
+    check(schema)
+    return schema
 
 
 def _mock_get(responses):
@@ -1856,9 +1871,7 @@ def test_fetch_github_schema_dereferences_deep_raml_util_ref():
     }
     with patch("folioclient.FolioClient.httpx.get", _mock_get(responses)):
         schema = FolioClient.fetch_github_schema(base)
-        result = jsonref.replace_refs(
-            schema, loader=FolioClient.fetch_github_schema, base_uri=base, proxies=False
-        )
+        result = dereference(schema, base, FolioClient.fetch_github_schema)
     assert result["properties"]["tags"]["properties"]["tagList"] == {"type": "array"}
 
 
@@ -1890,9 +1903,7 @@ def acq_models_sha():
 def test_acq_models_schemas_dereference(acq_models_sha, path):
     url = f"https://raw.githubusercontent.com/folio-org/acq-models/{acq_models_sha}/{path}"
     schema = FolioClient.fetch_github_schema(url)
-    result = jsonref.replace_refs(
-        schema, loader=FolioClient.fetch_github_schema, base_uri=url, proxies=False
-    )
+    result = dereference(schema, url, FolioClient.fetch_github_schema)
     assert result["properties"]
     _fully_resolve(result)
 
@@ -1918,3 +1929,141 @@ def test_latest_release_schemas_dereference(mock_ecs_check, module, method):
         schema = getattr(fc, method)()
     assert schema["properties"]
     _fully_resolve(schema)
+
+
+# --- dereference(): deterministic, document-relative $ref resolution -----------
+
+def _loader_for(docs, base="http://example.test/schemas/"):
+    fetched = []
+
+    def loader(url):
+        assert url.startswith(base), url
+        fetched.append(url)
+        return json.loads(json.dumps(docs[url[len(base):]]))
+
+    return loader, fetched
+
+
+def _generated_tree(n, seed):
+    """n files that reference each other by identical relative strings ("f<k>.json")."""
+    import random
+
+    rnd = random.Random(seed)
+    docs = {}
+    for i in range(n):
+        props = {}
+        for j in range(rnd.randint(2, 5)):
+            target = rnd.randrange(i + 1, n + 1)
+            props[f"p{j}"] = {"$ref": f"f{target}.json"} if target < n else {"type": f"leaf{j}"}
+        docs[f"f{i}.json"] = {"type": "object", "title": f"f{i}", "properties": props}
+    docs[f"f{n}.json"] = {"type": "string", "title": f"f{n}"}
+    return docs
+
+
+def _expected(docs, name):
+    d = docs[name]
+    if "properties" not in d:
+        return d
+    props = {
+        k: (_expected(docs, v["$ref"]) if "$ref" in v else v) for k, v in d["properties"].items()
+    }
+    return {**d, "properties": props}
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_dereference_is_deterministic_and_correct(seed):
+    """Regression: jsonref 1.1.0 (proxies=False) returned content of the wrong file for
+    some refs because _walk_refs memoizes by id() of objects that are freed mid-walk."""
+    base = "http://example.test/schemas/"
+    docs = _generated_tree(14, seed)
+    loader, _ = _loader_for(docs, base)
+    expected = _expected(docs, "f0.json")
+    for _ in range(50):
+        root = loader(base + "f0.json")
+        assert dereference(root, base + "f0.json", loader) == expected
+
+
+def test_dereference_fetches_each_document_once():
+    base = "http://example.test/schemas/"
+    docs = _generated_tree(14, 3)
+    loader, fetched = _loader_for(docs, base)
+    dereference(loader(base + "f0.json"), base + "f0.json", loader)
+    assert len(fetched) == len(set(fetched))
+
+
+def test_dereference_resolves_relative_refs_against_containing_document():
+    base = "http://example.test/schemas/"
+    docs = {
+        "a/b/root.json": {"properties": {"x": {"$ref": "../common/mid.json"}}},
+        # "./leaf.json" must resolve against a/common/, not against a/b/
+        "a/common/mid.json": {"title": "mid", "properties": {"y": {"$ref": "./leaf.json"}}},
+        "a/common/leaf.json": {"title": "leaf", "type": "array"},
+        "a/b/leaf.json": {"title": "WRONG", "type": "string"},
+    }
+    loader, _ = _loader_for(docs, base)
+    url = base + "a/b/root.json"
+    result = dereference(loader(url), url, loader)
+    assert result["properties"]["x"]["properties"]["y"] == {"title": "leaf", "type": "array"}
+
+
+def test_dereference_fragments_and_sibling_merge():
+    base = "http://example.test/schemas/"
+    docs = {
+        "root.json": {
+            "properties": {
+                "a": {"$ref": "defs.json#/definitions/a~1b", "description": "override"},
+                "b": {"$ref": "#/definitions/local"},
+            },
+            "definitions": {"local": {"type": "integer"}},
+        },
+        "defs.json": {"definitions": {"a/b": {"type": "string", "description": "orig"}}},
+    }
+    loader, _ = _loader_for(docs, base)
+    result = dereference(loader(base + "root.json"), base + "root.json", loader)
+    assert result["properties"]["a"] == {"type": "string", "description": "override"}
+    assert result["properties"]["b"] == {"type": "integer"}
+
+
+def test_dereference_cycle_leaves_absolute_marker():
+    base = "http://example.test/schemas/"
+    docs = {
+        "node.json": {"type": "object", "properties": {"child": {"$ref": "node.json"}, "id": {"type": "string"}}},
+        "a.json": {"properties": {"b": {"$ref": "b.json"}}},
+        "b.json": {"properties": {"a": {"$ref": "a.json"}}},
+    }
+    loader, _ = _loader_for(docs, base)
+    node = dereference(loader(base + "node.json"), base + "node.json", loader)
+    assert node["properties"]["child"] == {"$ref": base + "node.json"}
+    assert node["properties"]["id"] == {"type": "string"}
+    a = dereference(loader(base + "a.json"), base + "a.json", loader)
+    assert a["properties"]["b"]["properties"]["a"] == {"$ref": base + "a.json"}
+    json.dumps(node), json.dumps(a)
+
+
+def test_dereference_returns_independent_copies():
+    base = "http://example.test/schemas/"
+    docs = {
+        "root.json": {"properties": {"p": {"$ref": "t.json"}, "q": {"$ref": "t.json"}}},
+        "t.json": {"type": "string"},
+    }
+    loader, _ = _loader_for(docs, base)
+    result = dereference(loader(base + "root.json"), base + "root.json", loader)
+    result["properties"]["p"]["type"] = "changed"
+    assert result["properties"]["q"] == {"type": "string"}
+
+
+@pytest.mark.integration
+def test_composite_purchase_order_reference_numbers_is_stable():
+    sha = "afd8640ce5a1b0333126fba1f9d08d24150023e3"
+    url = (
+        "https://raw.githubusercontent.com/folio-org/acq-models/"
+        f"{sha}/mod-orders/schemas/composite_purchase_order.json"
+    )
+    loader = FolioClient.fetch_github_schema
+    for _ in range(20):
+        result = dereference(loader(url), url, loader)
+        ref_numbers = result["properties"]["poLines"]["items"]["properties"]["vendorDetail"][
+            "properties"
+        ]["referenceNumbers"]
+        assert ref_numbers["type"] == "array"
+        assert ref_numbers["items"]["description"] == "Reference number item"
