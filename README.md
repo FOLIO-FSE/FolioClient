@@ -31,7 +31,7 @@ FolioClient is a modern, async-capable Python library that provides a comprehens
 
 ## Installing
 
-**Requirements:** Python 3.10+ (v1.0.0+)
+**Requirements:** Python 3.11+ (v1.1.0+)
 
 ```bash
 pip install folioclient

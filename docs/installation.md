@@ -1,6 +1,6 @@
 # Installation
 
-FolioClient supports Python 3.10 and higher. We recommend using the latest stable version of Python.
+FolioClient supports Python 3.11 and higher. We recommend using the latest stable version of Python.
 
 ## Basic Installation
 
@@ -48,7 +48,7 @@ uv sync --extra orjson  # For experimental performance features
 
 ### Core Dependencies
 
-* **Python 3.10+**: Required for modern async/await and type hints
+* **Python 3.11+**: Required for modern async/await and type hints
 * **httpx**: Modern HTTP client for sync and async requests  
 * **jsonref**: JSON reference resolution for FOLIO schemas
 * **pyyaml**: YAML processing support
@@ -69,7 +69,7 @@ uv sync --extra orjson  # For experimental performance features
 
 FolioClient is tested against:
 
-* **Python versions**: 3.10, 3.11, 3.12, 3.13, 3.14
+* **Python versions**: 3.11, 3.12, 3.13, 3.14, 3.15
 * **Operating systems**: Linux, macOS, Windows
 * **FOLIO versions**: All [officially supported FOLIO releases](https://folio-org.atlassian.net/wiki/spaces/TC/pages/1187348628/DR-000043+-+Support+period)
 

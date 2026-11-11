@@ -8,7 +8,7 @@ To run these tests:
     pytest tests/integration_tests.py --run-integration
 
 Environment: FOLIO Community Snapshot
-- URL: https://folio-snapshot-okapi.dev.folio.org
+- URL: https://folio-etesting-snapshot-kong.ci.folio.org (Eureka)
 - Tenant: diku
 - Username: diku_admin
 - Password: admin
@@ -35,16 +35,12 @@ from folioclient.exceptions import (
 # pragma: warning disable=SC2068
 import os
 
+# Base tenant/credentials for the snapshot Eureka environments (gateway_url is supplied
+# by the per-environment configs below; the Okapi snapshot environments are decommissioned)
 SNAPSHOT_CONFIG = {
-    "gateway_url": "https://folio-snapshot-okapi.dev.folio.org",
     "tenant_id": "diku",
     "username": os.environ.get("FOLIO_SNAPSHOT_USERNAME", "diku_admin"),
     "password": os.environ.get("FOLIO_SNAPSHOT_PASSWORD", "admin"),
-}
-
-# pragma: warning disable=SC2068
-SNAPSHOT2_CONFIG = {
-    "gateway_url": "https://folio-snapshot-2-okapi.dev.folio.org",
 }
 
 # pragma: warning disable=SC2068
@@ -82,8 +78,6 @@ pytestmark = pytest.mark.integration
 
 
 SERVER_CONFIGS = [
-    ("snapshot", SNAPSHOT_CONFIG),
-    ("snapshot2", {**SNAPSHOT_CONFIG, **SNAPSHOT2_CONFIG}),
     ("eureka", {**SNAPSHOT_CONFIG, **SNAPSHOT_EUREKA_CONFIG}),
     ("eureka-ecs", SNAPSHOT_EUREKA_ECS_CONFIG),
     ("snapshot-2-eureka", {**SNAPSHOT_CONFIG, **SNAPSHOT_2_EUREKA_CONFIG}),
@@ -98,7 +92,7 @@ def server_config(request):
     Parametrized fixture that yields one server config dict per test invocation.
 
     Use environment variable INTEGRATION_SERVER to limit to a single config name,
-    e.g. INTEGRATION_SERVER=snapshot pytest tests/integration_tests.py --run-integration
+    e.g. INTEGRATION_SERVER=eureka pytest tests/integration_tests.py --run-integration
     """
     desired = request.config.getoption("--integration-server") or os.environ.get("INTEGRATION_SERVER")
     name = request.param
