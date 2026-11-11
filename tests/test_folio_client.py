@@ -1848,7 +1848,7 @@ def _mock_get(responses):
 def test_fetch_github_schema_rewrites_raml_util(ref):
     url = "https://raw.githubusercontent.com/o/r/sha/s.json"
     body = json.dumps({"$ref": ref})
-    with patch("folioclient.FolioClient.httpx.get", _mock_get({url: body})):
+    with patch("httpx.get", _mock_get({url: body})):
         assert FolioClient.fetch_github_schema(url) == {"$ref": f"{RAML_UTIL_URL}/x"}
 
 
@@ -1856,7 +1856,7 @@ def test_fetch_github_schema_is_idempotent():
     url = "https://raw.githubusercontent.com/o/r/sha/s.json"
     original = {"$ref": f"{RAML_UTIL_URL}/schemas/tags.schema", "d": "see raml-util docs"}
     body = json.dumps(original).replace("see raml-util docs", "see /raml-util docs")
-    with patch("folioclient.FolioClient.httpx.get", _mock_get({url: body})):
+    with patch("httpx.get", _mock_get({url: body})):
         result = FolioClient.fetch_github_schema(url)
     assert result["$ref"] == original["$ref"]
     assert result["d"] == "see /raml-util docs"
@@ -1869,7 +1869,7 @@ def test_fetch_github_schema_dereferences_deep_raml_util_ref():
         base: json.dumps({"type": "object", "properties": {"tags": {"$ref": "../../../raml-util/schemas/tags.schema"}}}),
         tags: json.dumps({"type": "object", "properties": {"tagList": {"type": "array"}}}),
     }
-    with patch("folioclient.FolioClient.httpx.get", _mock_get(responses)):
+    with patch("httpx.get", _mock_get(responses)):
         schema = FolioClient.fetch_github_schema(base)
         result = dereference(schema, base, FolioClient.fetch_github_schema)
     assert result["properties"]["tags"]["properties"]["tagList"] == {"type": "array"}
